@@ -5,7 +5,7 @@
 1. **Download your service account JSON file** from Google Cloud Console
 2. **Create a new Google Sheets** named "MFC Payment System Database"
 3. **Share the spreadsheet** with your service account email (Editor access)
-4. **Copy the Spreadsheet ID** from the URL
+4. **Copy the Spreadsheet ID** from the URLs
 
 ## Step 2: Set Up Environment Variables
 
