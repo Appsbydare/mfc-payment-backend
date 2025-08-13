@@ -5,11 +5,11 @@
 1. **Download your service account JSON file** from Google Cloud Console
 2. **Create a new Google Sheets** named "MFC Payment System Database"
 3. **Share the spreadsheet** with your service account email (Editor access)
-4. **Copy the Spreadsheet ID** from the URL
+4. **Copy the Spreadsheet ID** from the URLs
 
 ## Step 2: Set Up Environment Variables
 
-Create a `.env` file in the `api` directory with the following variables:
+Create a `.env` file in the `backend` directory with the following variables:
 
 ```env
 # Server Configuration
@@ -47,7 +47,7 @@ UPLOAD_PATH=./uploads
 
 ## Step 3: Install Dependencies
 
-Run the following command in the `api` directory:
+Run the following command in the `backend` directory:
 
 ```bash
 npm install

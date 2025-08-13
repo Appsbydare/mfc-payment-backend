@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "dist/index.js",
-      "use": "@vercel/node"
+  "functions": {
+    "dist/index.js": {
+      "maxDuration": 30,
+      "memory": 1024
     }
-  ],
+  },
   "routes": [
     {
       "src": "/(.*)",
