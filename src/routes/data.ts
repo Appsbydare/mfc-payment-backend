@@ -63,9 +63,35 @@ router.post('/import', upload.fields([
           // Debug: Log the headers that will be written
           console.log('Headers to write:', Object.keys(transformedData[0]));
           console.log('First transformed row values:', Object.values(transformedData[0]));
+          console.log('First transformed row object:', transformedData[0]);
+          console.log('Customer field value:', transformedData[0]['Customer']);
+          console.log('Customer field type:', typeof transformedData[0]['Customer']);
 
           // Clear the sheet first, then write new data
           await googleSheetsService.clearSheet('attendance');
+          
+          // Test with a simple data structure first
+          const testData = [
+            {
+              'Customer': 'Test Customer',
+              'Email': 'test@example.com',
+              'Date': '2025-01-01',
+              'Time': '10:00:00',
+              'ClassType': 'Test Class',
+              'Venue': 'Test Venue',
+              'Instructors': 'Test Instructor',
+              'BookingMethod': 'Test Method',
+              'Membership': 'Test Membership',
+              'BookingSource': 'Test Source',
+              'Status': 'Test Status',
+              'CheckinTimestamp': 'Test Timestamp'
+            }
+          ];
+          
+          console.log('Testing with simple data first...');
+          await googleSheetsService.writeSheet('attendance', testData);
+          
+          console.log('Now writing actual transformed data...');
           await googleSheetsService.writeSheet('attendance', transformedData);
           
           results.attendance.processed = transformedData.length;

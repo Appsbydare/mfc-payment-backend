@@ -104,17 +104,27 @@ export class GoogleSheetsService {
       console.log(`Writing to sheet ${sheetName} with headers:`, headers);
       console.log(`First row data:`, data[0]);
       
+      // Ensure headers are in the correct order and create values array
       const values = [
         headers,
         ...data.map(row => headers.map(header => row[header] || ''))
       ];
 
       console.log(`Values to write (first 2 rows):`, values.slice(0, 2));
+      console.log(`First row values:`, values[1]); // Log the actual data row
 
-      await this.sheets.spreadsheets.values.update({
+      // Use clear first, then update to ensure clean write
+      await this.sheets.spreadsheets.values.clear({
+        spreadsheetId: this.spreadsheetId,
+        range: `${sheetName}!A:Z`,
+      });
+
+      // Try using append instead of update to ensure all data is written
+      await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
         range: `${sheetName}!A1`,
         valueInputOption: 'RAW',
+        insertDataOption: 'OVERWRITE',
         resource: { values },
       });
       
