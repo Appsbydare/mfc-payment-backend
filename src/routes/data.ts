@@ -30,30 +30,31 @@ router.post('/import', upload.fields([
         if (parsedData.data && parsedData.data.length > 0) {
           // Debug: Log the first row to see the structure
           console.log('First row from CSV:', parsedData.data[0]);
+          console.log('CSV headers:', Object.keys(parsedData.data[0] as any));
+          console.log('Customer Name value from CSV:', (parsedData.data[0] as any)['Customer Name']);
           
-          // Transform attendance data to match expected format
+          // Transform attendance data to match expected Google Sheets format
           const transformedData = parsedData.data.map((row: any, index: number) => {
             const transformed = {
-              'Customer Name': row['Customer Name'] || '',
-              'Customer Email': row['Customer Email'] || '',
-              'Event Starts At': row['Event Starts At'] || '',
-              'Offering Type Name': row['Offering Type Name'] || '',
-              'Venue Name': row['Venue Name'] || '',
+              'Customer': row['Customer Name'] || '',
+              'Email': row['Customer Email'] || '',
+              'Date': row['Event Starts At'] ? new Date(row['Event Starts At']).toISOString().split('T')[0] : '',
+              'Time': row['Event Starts At'] ? new Date(row['Event Starts At']).toTimeString().split(' ')[0] : '',
+              'ClassType': row['Offering Type Name'] || '',
+              'Venue': row['Venue Name'] || '',
               'Instructors': row['Instructors'] || '',
-              'Booking Method': row['Booking Method'] || '',
-              'Customer Membership ID': row['Customer Membership ID'] || '',
-              'Membership ID': row['Membership ID'] || '',
-              'Membership Name': row['Membership Name'] || '',
-              'Booking Source': row['Booking Source'] || '',
+              'BookingMethod': row['Booking Method'] || '',
+              'Membership': row['Membership Name'] || '',
+              'BookingSource': row['Booking Source'] || '',
               'Status': row['Status'] || '',
-              'Checkin Timestamp': row['Checkin Timestamp'] || ''
+              'CheckinTimestamp': row['Checkin Timestamp'] || ''
             };
             
             // Debug: Log the first transformed row
             if (index === 0) {
               console.log('First transformed row:', transformed);
-              console.log('Customer Name value:', transformed['Customer Name']);
-              console.log('Customer Name length:', transformed['Customer Name'].length);
+              console.log('Customer value:', transformed['Customer']);
+              console.log('Customer length:', transformed['Customer'].length);
             }
             
             return transformed;
@@ -64,16 +65,8 @@ router.post('/import', upload.fields([
           console.log('First transformed row values:', Object.values(transformedData[0]));
 
           // Clear the sheet first, then write new data
-          await googleSheetsService.clearSheet('Attendance');
-          
-          // Try writing the original data first to see if transformation is the issue
-          console.log('Trying to write original data first...');
-          await googleSheetsService.writeSheet('Attendance', parsedData.data);
-          
-          // Then try the transformed data
-          console.log('Now trying transformed data...');
-          await googleSheetsService.clearSheet('Attendance');
-          await googleSheetsService.writeSheet('Attendance', transformedData);
+          await googleSheetsService.clearSheet('attendance');
+          await googleSheetsService.writeSheet('attendance', transformedData);
           
           results.attendance.processed = transformedData.length;
           results.attendance.added = transformedData.length;
@@ -91,11 +84,21 @@ router.post('/import', upload.fields([
         const parsedData = Papa.parse(csvContent, { header: true, skipEmptyLines: true });
         
         if (parsedData.data && parsedData.data.length > 0) {
-          // Write to Google Sheets
-          await googleSheetsService.writeSheet('Payments', parsedData.data);
+          // Transform payment data to match expected Google Sheets format
+          const transformedData = parsedData.data.map((row: any) => ({
+            'Date': row['Date'] || '',
+            'Customer': row['Customer'] || '',
+            'Memo': row['Memo'] || '',
+            'Amount': parseFloat(row['Amount']) || 0,
+            'Invoice': row['Invoice'] || ''
+          }));
           
-          results.payments.processed = parsedData.data.length;
-          results.payments.added = parsedData.data.length;
+          // Clear the sheet first, then write new data
+          await googleSheetsService.clearSheet('Payments');
+          await googleSheetsService.writeSheet('Payments', transformedData);
+          
+          results.payments.processed = transformedData.length;
+          results.payments.added = transformedData.length;
         }
       } catch (error) {
         console.error('Error processing payment file:', error);
@@ -127,7 +130,7 @@ router.post('/import', upload.fields([
 // @access  Private
 router.get('/attendance', async (req, res) => {
   try {
-    const data = await googleSheetsService.readSheet('Attendance');
+    const data = await googleSheetsService.readSheet('attendance');
     res.json({
       success: true,
       data,
