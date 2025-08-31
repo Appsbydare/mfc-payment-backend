@@ -28,24 +28,40 @@ router.post('/import', upload.fields([
         const parsedData = Papa.parse(csvContent, { header: true, skipEmptyLines: true });
         
         if (parsedData.data && parsedData.data.length > 0) {
+          // Debug: Log the first row to see the structure
+          console.log('First row from CSV:', parsedData.data[0]);
+          
           // Transform attendance data to match expected format
-          const transformedData = parsedData.data.map((row: any) => ({
-            'Customer Name': row['Customer Name'] || '',
-            'Customer Email': row['Customer Email'] || '',
-            'Event Starts At': row['Event Starts At'] || '',
-            'Offering Type Name': row['Offering Type Name'] || '',
-            'Venue Name': row['Venue Name'] || '',
-            'Instructors': row['Instructors'] || '',
-            'Booking Method': row['Booking Method'] || '',
-            'Customer Membership ID': row['Customer Membership ID'] || '',
-            'Membership ID': row['Membership ID'] || '',
-            'Membership Name': row['Membership Name'] || '',
-            'Booking Source': row['Booking Source'] || '',
-            'Status': row['Status'] || '',
-            'Checkin Timestamp': row['Checkin Timestamp'] || ''
-          }));
+          const transformedData = parsedData.data.map((row: any) => {
+            const transformed = {
+              'Customer Name': row['Customer Name'] || '',
+              'Customer Email': row['Customer Email'] || '',
+              'Event Starts At': row['Event Starts At'] || '',
+              'Offering Type Name': row['Offering Type Name'] || '',
+              'Venue Name': row['Venue Name'] || '',
+              'Instructors': row['Instructors'] || '',
+              'Booking Method': row['Booking Method'] || '',
+              'Customer Membership ID': row['Customer Membership ID'] || '',
+              'Membership ID': row['Membership ID'] || '',
+              'Membership Name': row['Membership Name'] || '',
+              'Booking Source': row['Booking Source'] || '',
+              'Status': row['Status'] || '',
+              'Checkin Timestamp': row['Checkin Timestamp'] || ''
+            };
+            
+            // Debug: Log the first transformed row
+            if (transformedData.length === 0) {
+              console.log('First transformed row:', transformed);
+            }
+            
+            return transformed;
+          });
 
-          // Write to Google Sheets
+          // Debug: Log the headers that will be written
+          console.log('Headers to write:', Object.keys(transformedData[0]));
+
+          // Clear the sheet first, then write new data
+          await googleSheetsService.clearSheet('Attendance');
           await googleSheetsService.writeSheet('Attendance', transformedData);
           
           results.attendance.processed = transformedData.length;

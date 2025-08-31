@@ -101,10 +101,15 @@ export class GoogleSheetsService {
       if (data.length === 0) return;
 
       const headers = Object.keys(data[0]);
+      console.log(`Writing to sheet ${sheetName} with headers:`, headers);
+      console.log(`First row data:`, data[0]);
+      
       const values = [
         headers,
         ...data.map(row => headers.map(header => row[header] || ''))
       ];
+
+      console.log(`Values to write (first 2 rows):`, values.slice(0, 2));
 
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,
@@ -112,6 +117,8 @@ export class GoogleSheetsService {
         valueInputOption: 'RAW',
         resource: { values },
       });
+      
+      console.log(`Successfully wrote ${data.length} rows to sheet ${sheetName}`);
     } catch (error) {
       console.error(`Error writing to sheet ${sheetName}:`, error);
       throw new Error(`Failed to write to sheet: ${sheetName}`);
@@ -154,6 +161,25 @@ export class GoogleSheetsService {
     } catch (error) {
       console.error(`Error updating row in sheet ${sheetName}:`, error);
       throw new Error(`Failed to update row in sheet: ${sheetName}`);
+    }
+  }
+
+  // Clear all data from a sheet
+  async clearSheet(sheetName: string): Promise<void> {
+    if (!this.isConfigured || !this.spreadsheetId) {
+      console.log('⚠️ Google Sheets not configured, skipping clear operation');
+      return;
+    }
+
+    try {
+      await this.sheets.spreadsheets.values.clear({
+        spreadsheetId: this.spreadsheetId,
+        range: `${sheetName}!A:Z`,
+      });
+      console.log(`Cleared sheet ${sheetName}`);
+    } catch (error) {
+      console.error(`Error clearing sheet ${sheetName}:`, error);
+      throw new Error(`Failed to clear sheet: ${sheetName}`);
     }
   }
 
