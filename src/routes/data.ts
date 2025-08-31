@@ -30,17 +30,19 @@ router.post('/import', upload.fields([
         if (parsedData.data && parsedData.data.length > 0) {
           // Transform attendance data to match expected format
           const transformedData = parsedData.data.map((row: any) => ({
-            Customer: row['Customer Name'] || '',
-            Email: row['Customer Email'] || '',
-            Date: row['Event Starts At'] ? new Date(row['Event Starts At']).toISOString().split('T')[0] : '',
-            Time: row['Event Starts At'] ? new Date(row['Event Starts At']).toTimeString().split(' ')[0] : '',
-            'Class Type': row['Offering Type Name'] || '',
-            Venue: row['Venue Name'] || '',
-            Instructors: row['Instructors'] || '',
+            'Customer Name': row['Customer Name'] || '',
+            'Customer Email': row['Customer Email'] || '',
+            'Event Starts At': row['Event Starts At'] || '',
+            'Offering Type Name': row['Offering Type Name'] || '',
+            'Venue Name': row['Venue Name'] || '',
+            'Instructors': row['Instructors'] || '',
             'Booking Method': row['Booking Method'] || '',
-            Membership: row['Membership Name'] || '',
+            'Customer Membership ID': row['Customer Membership ID'] || '',
+            'Membership ID': row['Membership ID'] || '',
+            'Membership Name': row['Membership Name'] || '',
             'Booking Source': row['Booking Source'] || '',
-            Status: row['Status'] || ''
+            'Status': row['Status'] || '',
+            'Checkin Timestamp': row['Checkin Timestamp'] || ''
           }));
 
           // Write to Google Sheets
