@@ -127,19 +127,34 @@ export class GoogleSheetsService {
 
   // Append data to a specific sheet
   async appendToSheet(sheetName: string, data: any[]): Promise<void> {
+    if (!this.isConfigured || !this.spreadsheetId) {
+      console.log('⚠️ Google Sheets not configured, skipping append operation');
+      return;
+    }
+
     try {
       if (data.length === 0) return;
 
       const headers = Object.keys(data[0]);
-      const values = data.map(row => headers.map(header => row[header] || ''));
+      console.log(`Appending to sheet ${sheetName} with headers:`, headers);
+      console.log(`First row data:`, data[0]);
+      
+      // Include headers in the values array
+      const values = [
+        headers,
+        ...data.map(row => headers.map(header => row[header] || ''))
+      ];
 
-      await this.sheets.spreadsheets.values.append({
+      console.log(`Values to append (first 2 rows):`, values.slice(0, 2));
+
+      await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,
-        range: `${sheetName}!A:A`,
+        range: `${sheetName}!A1`,
         valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
         resource: { values },
       });
+      
+      console.log(`Successfully appended ${data.length} rows to sheet ${sheetName}`);
     } catch (error) {
       console.error(`Error appending to sheet ${sheetName}:`, error);
       throw new Error(`Failed to append to sheet: ${sheetName}`);

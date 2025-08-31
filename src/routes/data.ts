@@ -32,7 +32,7 @@ router.post('/import', upload.fields([
           console.log('First row from CSV:', parsedData.data[0]);
           
           // Transform attendance data to match expected format
-          const transformedData = parsedData.data.map((row: any) => {
+          const transformedData = parsedData.data.map((row: any, index: number) => {
             const transformed = {
               'Customer Name': row['Customer Name'] || '',
               'Customer Email': row['Customer Email'] || '',
@@ -50,8 +50,10 @@ router.post('/import', upload.fields([
             };
             
             // Debug: Log the first transformed row
-            if (transformedData.length === 0) {
+            if (index === 0) {
               console.log('First transformed row:', transformed);
+              console.log('Customer Name value:', transformed['Customer Name']);
+              console.log('Customer Name length:', transformed['Customer Name'].length);
             }
             
             return transformed;
@@ -59,8 +61,17 @@ router.post('/import', upload.fields([
 
           // Debug: Log the headers that will be written
           console.log('Headers to write:', Object.keys(transformedData[0]));
+          console.log('First transformed row values:', Object.values(transformedData[0]));
 
           // Clear the sheet first, then write new data
+          await googleSheetsService.clearSheet('Attendance');
+          
+          // Try writing the original data first to see if transformation is the issue
+          console.log('Trying to write original data first...');
+          await googleSheetsService.writeSheet('Attendance', parsedData.data);
+          
+          // Then try the transformed data
+          console.log('Now trying transformed data...');
           await googleSheetsService.clearSheet('Attendance');
           await googleSheetsService.writeSheet('Attendance', transformedData);
           
