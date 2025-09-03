@@ -52,6 +52,13 @@ function monthYearMatch(date, month, year) {
   return true;
 }
 
+function inRange(date, fromDate, toDate) {
+  if (!date) return false;
+  if (fromDate && date < fromDate) return false;
+  if (toDate && date > toDate) return false;
+  return true;
+}
+
 function classifySession(classType) {
   const v = (classType || '').toString().toLowerCase();
   if (v.includes('private') || v.includes('1-1') || v.includes('1 to 1') || v.includes('one to one')) return 'private';
@@ -77,7 +84,9 @@ function isDiscountPayment(memo = '') {
 // @access  Private
 router.post('/calculate', async (req, res) => {
   try {
-    const { month, year } = req.body || {};
+    const { month, year, fromDate, toDate } = req.body || {};
+    const from = toDateOnly(fromDate);
+    const to = toDateOnly(toDate);
 
     // Load sheets
     const [attendance, payments] = await Promise.all([
@@ -88,7 +97,10 @@ router.post('/calculate', async (req, res) => {
     // Filtered attendance
     const attendanceFiltered = attendance.filter(r => {
       const d = toDateOnly(r['Date']);
-      return d && (!month && !year ? true : monthYearMatch(d, month, year));
+      if (!d) return false;
+      if (from || to) return inRange(d, from, to);
+      if (!month && !year) return true;
+      return monthYearMatch(d, month, year);
     });
 
     const groupSessions = attendanceFiltered.filter(r => classifySession(r['ClassType']) === 'group');
@@ -97,7 +109,10 @@ router.post('/calculate', async (req, res) => {
     // Filtered payments
     const paymentsFiltered = payments.filter(p => {
       const d = toDateOnly(p['Date']);
-      return d && (!month && !year ? true : monthYearMatch(d, month, year));
+      if (!d) return false;
+      if (from || to) return inRange(d, from, to);
+      if (!month && !year) return true;
+      return monthYearMatch(d, month, year);
     });
 
     const parsedPayments = paymentsFiltered.map(p => ({
@@ -126,7 +141,7 @@ router.post('/calculate', async (req, res) => {
 
     return res.json({
       success: true,
-      filters: { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null },
+      filters: { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, fromDate: from ? from.toISOString().slice(0,10) : null, toDate: to ? to.toISOString().slice(0,10) : null },
       counts,
       revenue: { totalPayments },
       splits,
