@@ -79,6 +79,14 @@ function isDiscountPayment(memo = '') {
   return keywords.some(k => v.includes(k));
 }
 
+function getDiscountType(memo = '', amount = 0) {
+  const v = memo.toString().toLowerCase();
+  const isFullKeywords = v.includes('freedom pass') || v.includes('mindbody switch') || v.includes('100%');
+  if (isFullKeywords || amount === 0) return 'full';
+  if (isDiscountPayment(memo)) return 'partial';
+  return null;
+}
+
 // @desc    Calculate payments (scaffold)
 // @route   POST /payments/calculate
 // @access  Private
@@ -122,15 +130,25 @@ router.post('/calculate', async (req, res) => {
       amount: parseFloat(p['Amount'] || '0') || 0,
       invoice: p['Invoice'] || '',
       isDiscount: isDiscountPayment(p['Memo'] || ''),
+      discountType: getDiscountType(p['Memo'] || '', parseFloat(p['Amount'] || '0') || 0),
     }));
 
-    const totalPayments = parsedPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    // Exclude full discounts from revenue totals and splits
+    const paymentsEffective = parsedPayments.filter(p => p.discountType !== 'full');
+    const totalPayments = paymentsEffective.reduce((sum, p) => sum + (p.amount || 0), 0);
     const counts = {
       attendanceTotal: attendanceFiltered.length,
       groupSessions: groupSessions.length,
       privateSessions: privateSessions.length,
       paymentsCount: parsedPayments.length,
       discountPayments: parsedPayments.filter(p => p.isDiscount).length,
+    };
+
+    const discounts = {
+      fullCount: parsedPayments.filter(p => p.discountType === 'full').length,
+      fullAmount: parsedPayments.filter(p => p.discountType === 'full').reduce((s, p) => s + (p.amount || 0), 0),
+      partialCount: parsedPayments.filter(p => p.discountType === 'partial').length,
+      partialAmount: parsedPayments.filter(p => p.discountType === 'partial').reduce((s, p) => s + (p.amount || 0), 0),
     };
 
     // Proportional revenue allocation by session counts (heuristic until session-payment mapping is implemented)
@@ -167,6 +185,7 @@ router.post('/calculate', async (req, res) => {
       counts,
       revenue: { totalPayments, groupRevenue: +groupRevenue.toFixed(2), privateRevenue: +privateRevenue.toFixed(2) },
       splits,
+      discounts,
       notes: 'This is an initial scaffold. Mapping payments to sessions and applying rules comes next.',
     });
   } catch (error) {
