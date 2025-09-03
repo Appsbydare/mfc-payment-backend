@@ -152,9 +152,43 @@ router.post('/calculate', async (req, res) => {
     };
 
     // Proportional revenue allocation by session counts (heuristic until session-payment mapping is implemented)
+    // Allocate payments to group/private by customer's session mix within range
+    const customerSessions = {};
+    attendanceFiltered.forEach(r => {
+      const customer = (r['Customer'] || '').trim();
+      const type = classifySession(r['ClassType']);
+      if (!customerSessions[customer]) customerSessions[customer] = { group: 0, private: 0 };
+      customerSessions[customer][type] += 1;
+    });
+
     const totalSessions = counts.groupSessions + counts.privateSessions;
-    const groupRevenue = totalSessions > 0 ? (totalPayments * (counts.groupSessions / totalSessions)) : 0;
-    const privateRevenue = totalSessions > 0 ? (totalPayments * (counts.privateSessions / totalSessions)) : 0;
+    let allocatedGroupRevenue = 0;
+    let allocatedPrivateRevenue = 0;
+    let unassignedAmount = 0;
+
+    paymentsEffective.forEach(p => {
+      const stats = customerSessions[(p.customer || '').trim()];
+      if (stats) {
+        const cTotal = (stats.group || 0) + (stats.private || 0);
+        if (cTotal > 0) {
+          allocatedGroupRevenue += p.amount * (stats.group / cTotal);
+          allocatedPrivateRevenue += p.amount * (stats.private / cTotal);
+        } else {
+          unassignedAmount += p.amount;
+        }
+      } else {
+        unassignedAmount += p.amount;
+      }
+    });
+
+    if (unassignedAmount > 0) {
+      const globalGroupShare = totalSessions > 0 ? (counts.groupSessions / totalSessions) : 1;
+      allocatedGroupRevenue += unassignedAmount * globalGroupShare;
+      allocatedPrivateRevenue += unassignedAmount * (1 - globalGroupShare);
+    }
+
+    const groupRevenue = allocatedGroupRevenue;
+    const privateRevenue = allocatedPrivateRevenue;
 
     // Default percentages from Final_Requirement.txt
     const groupPct = { coach: 43.5, bgm: 30.0, management: 8.5, mfc: 18.0 };
