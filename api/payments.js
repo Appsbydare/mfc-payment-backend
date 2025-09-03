@@ -133,17 +133,39 @@ router.post('/calculate', async (req, res) => {
       discountPayments: parsedPayments.filter(p => p.isDiscount).length,
     };
 
-    // Scaffolded revenue splits (actual mapping to sessions will be added next)
+    // Proportional revenue allocation by session counts (heuristic until session-payment mapping is implemented)
+    const totalSessions = counts.groupSessions + counts.privateSessions;
+    const groupRevenue = totalSessions > 0 ? (totalPayments * (counts.groupSessions / totalSessions)) : 0;
+    const privateRevenue = totalSessions > 0 ? (totalPayments * (counts.privateSessions / totalSessions)) : 0;
+
+    // Default percentages from Final_Requirement.txt
+    const groupPct = { coach: 43.5, bgm: 30.0, management: 8.5, mfc: 18.0 };
+    const privatePct = { coach: 80.0, landlord: 15.0, management: 0.0, mfc: 5.0 };
+
     const splits = {
-      group: { coach: 0, bgm: 0, management: 0, mfc: 0 },
-      private: { coach: 0, landlord: 0, management: 0, mfc: 0 },
+      group: {
+        revenue: groupRevenue,
+        coach: +(groupRevenue * groupPct.coach / 100).toFixed(2),
+        bgm: +(groupRevenue * groupPct.bgm / 100).toFixed(2),
+        management: +(groupRevenue * groupPct.management / 100).toFixed(2),
+        mfc: +(groupRevenue * groupPct.mfc / 100).toFixed(2),
+        percentage: groupPct,
+      },
+      private: {
+        revenue: privateRevenue,
+        coach: +(privateRevenue * privatePct.coach / 100).toFixed(2),
+        landlord: +(privateRevenue * privatePct.landlord / 100).toFixed(2),
+        management: +(privateRevenue * privatePct.management / 100).toFixed(2),
+        mfc: +(privateRevenue * privatePct.mfc / 100).toFixed(2),
+        percentage: privatePct,
+      },
     };
 
     return res.json({
       success: true,
       filters: { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, fromDate: from ? from.toISOString().slice(0,10) : null, toDate: to ? to.toISOString().slice(0,10) : null },
       counts,
-      revenue: { totalPayments },
+      revenue: { totalPayments, groupRevenue: +groupRevenue.toFixed(2), privateRevenue: +privateRevenue.toFixed(2) },
       splits,
       notes: 'This is an initial scaffold. Mapping payments to sessions and applying rules comes next.',
     });
