@@ -309,50 +309,114 @@ router.post('/calculate', async (req, res) => {
       },
     };
 
-    // Coach-level breakdown using attendance weighting
-    const coachUnits = {};
-    groupSessions.forEach(r => {
-      const instructors = (r['Instructors'] || '').split(',').map(s => s.trim()).filter(Boolean);
-      const unit = instructors.length > 0 ? 1 / instructors.length : 1;
-      (instructors.length ? instructors : ['Unassigned']).forEach(name => {
-        if (!coachUnits[name]) coachUnits[name] = { group: 0, private: 0 };
-        coachUnits[name].group += unit;
-      });
-    });
-    privateSessions.forEach(r => {
-      const instructors = (r['Instructors'] || '').split(',').map(s => s.trim()).filter(Boolean);
-      const unit = instructors.length > 0 ? 1 / instructors.length : 1;
-      (instructors.length ? instructors : ['Unassigned']).forEach(name => {
-        if (!coachUnits[name]) coachUnits[name] = { group: 0, private: 0 };
-        coachUnits[name].private += unit;
-      });
+    // Map payments to sessions per customer and build per-attendance effective amounts
+    const attendanceWithIdx = attendanceFiltered.map((r, idx) => ({ ...r, __idx: idx }));
+    const customerToAttendance = {};
+    attendanceWithIdx.forEach(r => {
+      const customer = (r['Customer'] || '').trim();
+      if (!customerToAttendance[customer]) customerToAttendance[customer] = { group: [], private: [] };
+      const cat = classifySession(r['ClassType']);
+      customerToAttendance[customer][cat].push(r);
     });
 
-    const totalGroupUnits = Object.values(coachUnits).reduce((s, c) => s + (c.group || 0), 0);
-    const totalPrivateUnits = Object.values(coachUnits).reduce((s, c) => s + (c.private || 0), 0);
-    const groupCoachPool = splits.group.coach;
-    const privateCoachPool = splits.private.coach;
+    const effectiveByIdx = new Map();
+    paymentsEffective.forEach(p => {
+      const customer = (p.customer || '').trim();
+      const buckets = customerToAttendance[customer];
+      if (!buckets) return;
+      const gCount = buckets.group.length;
+      const pCount = buckets.private.length;
+      const totalCount = gCount + pCount;
+      if (totalCount === 0) return;
+      const gAmount = gCount > 0 ? p.amount * (gCount / totalCount) : 0;
+      const prAmount = pCount > 0 ? p.amount * (pCount / totalCount) : 0;
+      const perGroup = gCount > 0 ? gAmount / gCount : 0;
+      const perPrivate = pCount > 0 ? prAmount / pCount : 0;
+      buckets.group.forEach(r => {
+        const prev = effectiveByIdx.get(r.__idx) || 0;
+        effectiveByIdx.set(r.__idx, prev + perGroup);
+      });
+      buckets.private.forEach(r => {
+        const prev = effectiveByIdx.get(r.__idx) || 0;
+        effectiveByIdx.set(r.__idx, prev + perPrivate);
+      });
+    });
 
-    const coachBreakdown = Object.entries(coachUnits).map(([name, units]) => {
-      const groupShare = totalGroupUnits > 0 ? (units.group / totalGroupUnits) : 0;
-      const privateShare = totalPrivateUnits > 0 ? (units.private / totalPrivateUnits) : 0;
+    // Build detail rows per attendance and aggregate per-coach gross
+    const coachGross = {};
+    const detailTemp = attendanceWithIdx.map(r => {
+      const cat = classifySession(r['ClassType']);
+      const eff = +(effectiveByIdx.get(r.__idx) || 0).toFixed(2);
+      const instructors = (r['Instructors'] || '').split(',').map(s => s.trim()).filter(Boolean);
+      const numInst = Math.max(1, instructors.length);
+      const pct = cat === 'group' ? groupPct : privatePct;
+      const coachAmt = +(eff * (pct.coach / 100)).toFixed(2);
+      const bgmAmt = +(eff * ((cat === 'group' ? pct.bgm : pct.landlord) / 100)).toFixed(2);
+      const mgmtAmt = +(eff * (pct.management / 100)).toFixed(2);
+      const mfcAmt = +(eff * (pct.mfc / 100)).toFixed(2);
 
-      const coachGroupGross = +(groupRevenue * groupShare).toFixed(2);
-      const coachPrivateGross = +(privateRevenue * privateShare).toFixed(2);
-
-      const groupPayment = +(coachGroupGross * (groupPct.coach / 100)).toFixed(2);
-      const privatePayment = +(coachPrivateGross * (privatePct.coach / 100)).toFixed(2);
-
-      const bgmPayment = +((coachGroupGross * (groupPct.bgm / 100)) + (coachPrivateGross * (privatePct.landlord / 100))).toFixed(2);
-      const managementPayment = +((coachGroupGross * (groupPct.management / 100)) + (coachPrivateGross * (privatePct.management / 100))).toFixed(2);
-      const mfcRetained = +((coachGroupGross * (groupPct.mfc / 100)) + (coachPrivateGross * (privatePct.mfc / 100))).toFixed(2);
+      // Aggregate gross per coach (split by instructors equally)
+      const sharePerCoach = numInst > 0 ? eff / numInst : eff;
+      (instructors.length ? instructors : ['Unassigned']).forEach(name => {
+        if (!coachGross[name]) coachGross[name] = { groupGross: 0, privateGross: 0, groupUnits: 0, privateUnits: 0 };
+        if (cat === 'group') {
+          coachGross[name].groupGross += sharePerCoach;
+          coachGross[name].groupUnits += 1 / numInst;
+        } else {
+          coachGross[name].privateGross += sharePerCoach;
+          coachGross[name].privateUnits += 1 / numInst;
+        }
+      });
 
       return {
+        CalcId: '', // filled later
+        RowId: 0,   // filled later
+        Date: r['Date'] || '',
+        Customer: r['Customer'] || '',
+        Coach: instructors.join(', '),
+        ClassType: r['ClassType'] || '',
+        SessionCategory: cat,
+        PackageName: r['Membership'] || '',
+        Invoice: '',
+        PaymentAmount: '',
+        IsDiscount: '',
+        DiscountType: '',
+        DiscountAmount: '',
+        EffectiveAmount: eff,
+        RuleId: '',
+        IsFixedRate: '',
+        UnitPrice: '',
+        Units: (1 / numInst).toFixed(2),
+        CoachPercent: pct.coach,
+        BgmPercent: cat === 'group' ? pct.bgm : pct.landlord,
+        ManagementPercent: pct.management,
+        MfcPercent: pct.mfc,
+        CoachAmount: coachAmt,
+        BgmAmount: bgmAmt,
+        ManagementAmount: mgmtAmt,
+        MfcAmount: mfcAmt,
+        SourceAttendanceRowId: r.__idx + 1,
+        SourcePaymentRowId: '',
+        Status: 'calculated',
+        ExceptionFlag: '',
+        ExceptionReason: '',
+        Notes: '',
+      };
+    });
+
+    // Build coach breakdown from coachGross
+    const coachBreakdown = Object.entries(coachGross).map(([name, g]) => {
+      const groupPayment = +((g.groupGross || 0) * (groupPct.coach / 100)).toFixed(2);
+      const privatePayment = +((g.privateGross || 0) * (privatePct.coach / 100)).toFixed(2);
+      const bgmPayment = +(((g.groupGross || 0) * (groupPct.bgm / 100)) + ((g.privateGross || 0) * (privatePct.landlord / 100))).toFixed(2);
+      const managementPayment = +(((g.groupGross || 0) * (groupPct.management / 100)) + ((g.privateGross || 0) * (privatePct.management / 100))).toFixed(2);
+      const mfcRetained = +(((g.groupGross || 0) * (groupPct.mfc / 100)) + ((g.privateGross || 0) * (privatePct.mfc / 100))).toFixed(2);
+      return {
         coach: name,
-        groupAttendances: +units.group.toFixed(2),
-        privateAttendances: +units.private.toFixed(2),
-        groupGross: coachGroupGross,
-        privateGross: coachPrivateGross,
+        groupAttendances: +(g.groupUnits || 0).toFixed(2),
+        privateAttendances: +(g.privateUnits || 0).toFixed(2),
+        groupGross: +(g.groupGross || 0).toFixed(2),
+        privateGross: +(g.privateGross || 0).toFixed(2),
         groupPayment,
         privatePayment,
         totalPayment: +(groupPayment + privatePayment).toFixed(2),
@@ -399,84 +463,13 @@ router.post('/calculate', async (req, res) => {
       RunAtISO: iso,
     }));
 
-    // Minimal detail rows: two per coach (group/private)
+    // Convert temp detail to final and assign CalcId/RowId
     let rowIdCounter = 1;
-    const detailRows = [];
-    Object.entries(coachUnits).forEach(([name, units]) => {
-      // group
-      const coachGroupGross = +(groupRevenue * (totalGroupUnits > 0 ? (units.group / totalGroupUnits) : 0)).toFixed(2);
-      const coachPrivateGross = +(privateRevenue * (totalPrivateUnits > 0 ? (units.private / totalPrivateUnits) : 0)).toFixed(2);
-
-      detailRows.push({
-        CalcId: calcId,
-        RowId: rowIdCounter++,
-        Date: '',
-        Customer: '',
-        Coach: name,
-        ClassType: '',
-        SessionCategory: 'group',
-        PackageName: '',
-        Invoice: '',
-        PaymentAmount: '',
-        IsDiscount: '',
-        DiscountType: '',
-        DiscountAmount: '',
-        EffectiveAmount: coachGroupGross,
-        RuleId: '',
-        IsFixedRate: '',
-        UnitPrice: '',
-        Units: Number(units.group || 0).toFixed(2),
-        CoachPercent: groupPct.coach,
-        BgmPercent: groupPct.bgm,
-        ManagementPercent: groupPct.management,
-        MfcPercent: groupPct.mfc,
-        CoachAmount: (coachBreakdown.find(r => r.coach === name)?.groupPayment) || 0,
-        BgmAmount: +(coachGroupGross * (groupPct.bgm / 100)).toFixed(2),
-        ManagementAmount: +(coachGroupGross * (groupPct.management / 100)).toFixed(2),
-        MfcAmount: +(coachGroupGross * (groupPct.mfc / 100)).toFixed(2),
-        SourceAttendanceRowId: '',
-        SourcePaymentRowId: '',
-        Status: 'calculated',
-        ExceptionFlag: '',
-        ExceptionReason: '',
-        Notes: 'Aggregated row',
-      });
-      // private
-      detailRows.push({
-        CalcId: calcId,
-        RowId: rowIdCounter++,
-        Date: '',
-        Customer: '',
-        Coach: name,
-        ClassType: '',
-        SessionCategory: 'private',
-        PackageName: '',
-        Invoice: '',
-        PaymentAmount: '',
-        IsDiscount: '',
-        DiscountType: '',
-        DiscountAmount: '',
-        EffectiveAmount: coachPrivateGross,
-        RuleId: '',
-        IsFixedRate: '',
-        UnitPrice: '',
-        Units: Number(units.private || 0).toFixed(2),
-        CoachPercent: privatePct.coach,
-        BgmPercent: privatePct.landlord,
-        ManagementPercent: privatePct.management,
-        MfcPercent: privatePct.mfc,
-        CoachAmount: (coachBreakdown.find(r => r.coach === name)?.privatePayment) || 0,
-        BgmAmount: +(coachPrivateGross * (privatePct.landlord / 100)).toFixed(2),
-        ManagementAmount: +(coachPrivateGross * (privatePct.management / 100)).toFixed(2),
-        MfcAmount: +(coachPrivateGross * (privatePct.mfc / 100)).toFixed(2),
-        SourceAttendanceRowId: '',
-        SourcePaymentRowId: '',
-        Status: 'calculated',
-        ExceptionFlag: '',
-        ExceptionReason: '',
-        Notes: 'Aggregated row',
-      });
-    });
+    const detailRows = detailTemp.map(r => ({
+      ...r,
+      CalcId: calcId,
+      RowId: rowIdCounter++,
+    }));
 
     try {
       await writeSheet('payment_calculator', summaryRows);
@@ -497,6 +490,7 @@ router.post('/calculate', async (req, res) => {
       splits,
       discounts,
       coachBreakdown,
+      calcId,
       notes: 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
     });
   } catch (error) {
