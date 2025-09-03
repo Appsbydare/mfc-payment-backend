@@ -46,7 +46,10 @@ function parseCSVData(buffer) {
     readableStream.push(null);
 
     readableStream
-      .pipe(csv())
+      .pipe(csv({
+        mapHeaders: ({ header }) => (header || '').toString().replace(/^\uFEFF/, '').trim(),
+        mapValues: ({ value }) => (typeof value === 'string' ? value.trim() : value)
+      }))
       .on('data', (data) => results.push(data))
       .on('end', () => resolve(results))
       .on('error', (error) => reject(error));
