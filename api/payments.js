@@ -334,15 +334,31 @@ router.post('/calculate', async (req, res) => {
     const privateCoachPool = splits.private.coach;
 
     const coachBreakdown = Object.entries(coachUnits).map(([name, units]) => {
-      const groupPayment = totalGroupUnits > 0 ? +(groupCoachPool * (units.group / totalGroupUnits)).toFixed(2) : 0;
-      const privatePayment = totalPrivateUnits > 0 ? +(privateCoachPool * (units.private / totalPrivateUnits)).toFixed(2) : 0;
+      const groupShare = totalGroupUnits > 0 ? (units.group / totalGroupUnits) : 0;
+      const privateShare = totalPrivateUnits > 0 ? (units.private / totalPrivateUnits) : 0;
+
+      const coachGroupGross = +(groupRevenue * groupShare).toFixed(2);
+      const coachPrivateGross = +(privateRevenue * privateShare).toFixed(2);
+
+      const groupPayment = +(coachGroupGross * (groupPct.coach / 100)).toFixed(2);
+      const privatePayment = +(coachPrivateGross * (privatePct.coach / 100)).toFixed(2);
+
+      const bgmPayment = +((coachGroupGross * (groupPct.bgm / 100)) + (coachPrivateGross * (privatePct.landlord / 100))).toFixed(2);
+      const managementPayment = +((coachGroupGross * (groupPct.management / 100)) + (coachPrivateGross * (privatePct.management / 100))).toFixed(2);
+      const mfcRetained = +((coachGroupGross * (groupPct.mfc / 100)) + (coachPrivateGross * (privatePct.mfc / 100))).toFixed(2);
+
       return {
         coach: name,
         groupAttendances: +units.group.toFixed(2),
         privateAttendances: +units.private.toFixed(2),
+        groupGross: coachGroupGross,
+        privateGross: coachPrivateGross,
         groupPayment,
         privatePayment,
         totalPayment: +(groupPayment + privatePayment).toFixed(2),
+        bgmPayment,
+        managementPayment,
+        mfcRetained,
       };
     }).sort((a, b) => b.totalPayment - a.totalPayment);
 
@@ -356,6 +372,10 @@ router.post('/calculate', async (req, res) => {
 
     const filtersOut = { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, fromDate: from ? from.toISOString().slice(0,10) : null, toDate: to ? to.toISOString().slice(0,10) : null };
 
+    // Allocate partial discount amount to coaches by their share of total gross
+    const totalGross = groupRevenue + privateRevenue;
+    const partialDiscountTotal = discounts.partialAmount || 0;
+
     const summaryRows = (coachBreakdown || []).map(row => ({
       CalcId: calcId,
       Month: filtersOut.month || '',
@@ -364,15 +384,15 @@ router.post('/calculate', async (req, res) => {
       Coach: row.coach,
       GroupAttendances: row.groupAttendances,
       PrivateAttendances: row.privateAttendances,
-      GroupGross: '',
-      PrivateGross: '',
-      DiscountsApplied: '',
+      GroupGross: row.groupGross,
+      PrivateGross: row.privateGross,
+      DiscountsApplied: totalGross > 0 ? +((partialDiscountTotal) * ((row.groupGross + row.privateGross) / totalGross)).toFixed(2) : 0,
       GroupPayment: row.groupPayment,
       PrivatePayment: row.privatePayment,
       TotalPayment: row.totalPayment,
-      BgmPayment: '',
-      ManagementPayment: '',
-      MfcRetained: '',
+      BgmPayment: row.bgmPayment,
+      ManagementPayment: row.managementPayment,
+      MfcRetained: row.mfcRetained,
       Notes: 'Calculated via API',
       RulesVersion: sysVersion,
       RunBy: 'api',
@@ -384,6 +404,9 @@ router.post('/calculate', async (req, res) => {
     const detailRows = [];
     Object.entries(coachUnits).forEach(([name, units]) => {
       // group
+      const coachGroupGross = +(groupRevenue * (totalGroupUnits > 0 ? (units.group / totalGroupUnits) : 0)).toFixed(2);
+      const coachPrivateGross = +(privateRevenue * (totalPrivateUnits > 0 ? (units.private / totalPrivateUnits) : 0)).toFixed(2);
+
       detailRows.push({
         CalcId: calcId,
         RowId: rowIdCounter++,
@@ -398,7 +421,7 @@ router.post('/calculate', async (req, res) => {
         IsDiscount: '',
         DiscountType: '',
         DiscountAmount: '',
-        EffectiveAmount: '',
+        EffectiveAmount: coachGroupGross,
         RuleId: '',
         IsFixedRate: '',
         UnitPrice: '',
@@ -408,9 +431,9 @@ router.post('/calculate', async (req, res) => {
         ManagementPercent: groupPct.management,
         MfcPercent: groupPct.mfc,
         CoachAmount: (coachBreakdown.find(r => r.coach === name)?.groupPayment) || 0,
-        BgmAmount: '',
-        ManagementAmount: '',
-        MfcAmount: '',
+        BgmAmount: +(coachGroupGross * (groupPct.bgm / 100)).toFixed(2),
+        ManagementAmount: +(coachGroupGross * (groupPct.management / 100)).toFixed(2),
+        MfcAmount: +(coachGroupGross * (groupPct.mfc / 100)).toFixed(2),
         SourceAttendanceRowId: '',
         SourcePaymentRowId: '',
         Status: 'calculated',
@@ -433,7 +456,7 @@ router.post('/calculate', async (req, res) => {
         IsDiscount: '',
         DiscountType: '',
         DiscountAmount: '',
-        EffectiveAmount: '',
+        EffectiveAmount: coachPrivateGross,
         RuleId: '',
         IsFixedRate: '',
         UnitPrice: '',
@@ -443,9 +466,9 @@ router.post('/calculate', async (req, res) => {
         ManagementPercent: privatePct.management,
         MfcPercent: privatePct.mfc,
         CoachAmount: (coachBreakdown.find(r => r.coach === name)?.privatePayment) || 0,
-        BgmAmount: '',
-        ManagementAmount: '',
-        MfcAmount: '',
+        BgmAmount: +(coachPrivateGross * (privatePct.landlord / 100)).toFixed(2),
+        ManagementAmount: +(coachPrivateGross * (privatePct.management / 100)).toFixed(2),
+        MfcAmount: +(coachPrivateGross * (privatePct.mfc / 100)).toFixed(2),
         SourceAttendanceRowId: '',
         SourcePaymentRowId: '',
         Status: 'calculated',
