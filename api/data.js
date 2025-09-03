@@ -56,6 +56,52 @@ function parseCSVData(buffer) {
   });
 }
 
+// Ensure a sheet exists, create if missing
+async function ensureSheetExists(sheetName) {
+  const auth = getGoogleSheetsAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const exists = meta.data.sheets?.some(s => s.properties?.title === sheetName);
+  if (exists) return;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource: {
+      requests: [
+        { addSheet: { properties: { title: sheetName } } }
+      ]
+    }
+  });
+}
+
+// Append duplicates to a dedicated sheet
+async function appendDuplicatesToSheet(duplicates, sourceSheet) {
+  if (!duplicates || duplicates.length === 0) return;
+
+  const sheetName = 'duplicates';
+  const auth = getGoogleSheetsAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+  await ensureSheetExists(sheetName);
+
+  const headers = [...Object.keys(duplicates[0] || {}), 'SourceSheet'];
+  const values = [
+    headers,
+    ...duplicates.map(row => headers.map(h => h === 'SourceSheet' ? sourceSheet : (row[h] || '')))
+  ];
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${sheetName}!A1`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    resource: { values }
+  });
+}
+
 // Get existing data from Google Sheets
 async function getExistingData(sheetName) {
   try {
@@ -214,6 +260,9 @@ router.post('/import', upload.fields([
         // Update Google Sheets
         await updateGoogleSheets('attendance', allAttendanceData);
 
+        // Append duplicates to the duplicates sheet for later review
+        await appendDuplicatesToSheet(attendanceResult.duplicates, 'attendance');
+
         results.attendance = {
           processed: processedAttendance.length,
           duplicates: attendanceResult.duplicates.length,
@@ -246,6 +295,9 @@ router.post('/import', upload.fields([
 
         // Update Google Sheets
         await updateGoogleSheets('payments', allPaymentData);
+
+        // Append duplicates to the duplicates sheet for later review
+        await appendDuplicatesToSheet(paymentResult.duplicates, 'payments');
 
         results.payments = {
           processed: processedPayments.length,
