@@ -36,6 +36,34 @@ async function readSheet(sheetName) {
   });
 }
 
+// Write an array of objects to a sheet (clears A:Z, writes headers + rows)
+async function writeSheet(sheetName, data) {
+  if (!Array.isArray(data) || data.length === 0) return;
+
+  const auth = getGoogleSheetsAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+  const headers = Object.keys(data[0]);
+  const values = [headers, ...data.map(row => headers.map(h => (row[h] ?? '')))]
+    .map(r => r.map(v => (v === null || v === undefined ? '' : v)));
+
+  // Clear old content
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: `${sheetName}!A:Z`,
+  });
+
+  // Append new
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${sheetName}!A1`,
+    valueInputOption: 'RAW',
+    insertDataOption: 'OVERWRITE',
+    resource: { values },
+  });
+}
+
 function toDateOnly(value) {
   if (!value) return null;
   const d = new Date(value);
@@ -97,10 +125,24 @@ router.post('/calculate', async (req, res) => {
     const to = toDateOnly(toDate);
 
     // Load sheets
-    const [attendance, payments] = await Promise.all([
+    const [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = await Promise.all([
       readSheet('attendance'),
       readSheet('payments'),
+      readSheet('rules').catch(() => []),
+      readSheet('settings').catch(() => []),
+      readSheet('discounts').catch(() => []),
     ]);
+
+    // Helpers to read flexible column names from sheets
+    const getVal = (row, keys) => {
+      for (const k of keys) {
+        if (row[k] !== undefined) return row[k];
+        // try case-insensitive match
+        const found = Object.keys(row).find(x => x.toLowerCase() === k.toLowerCase());
+        if (found) return row[found];
+      }
+      return undefined;
+    };
 
     // Filtered attendance
     const attendanceFiltered = attendance.filter(r => {
@@ -123,15 +165,47 @@ router.post('/calculate', async (req, res) => {
       return monthYearMatch(d, month, year);
     });
 
-    const parsedPayments = paymentsFiltered.map(p => ({
-      date: toDateOnly(p['Date']),
-      customer: p['Customer'] || '',
-      memo: p['Memo'] || '',
-      amount: parseFloat(p['Amount'] || '0') || 0,
-      invoice: p['Invoice'] || '',
-      isDiscount: isDiscountPayment(p['Memo'] || ''),
-      discountType: getDiscountType(p['Memo'] || '', parseFloat(p['Amount'] || '0') || 0),
-    }));
+    // Build discount matchers from sheet if present
+    const discountsMatchers = (Array.isArray(discountsSheet) ? discountsSheet : [])
+      .map(r => ({
+        alias: (getVal(r, ['alias']) || '').toString().trim().toLowerCase(),
+        matchType: (getVal(r, ['match_type']) || '').toString().trim().toLowerCase(),
+        discountType: (getVal(r, ['discount_type']) || '').toString().trim().toLowerCase(),
+        active: (getVal(r, ['active']) || '').toString().trim().toLowerCase(),
+      }))
+      .filter(r => r.alias && (r.active === 'true' || r.active === '1' || r.active === 'yes'));
+
+    const detectDiscount = (memo, amount) => {
+      const text = (memo || '').toString().toLowerCase();
+      if (discountsMatchers.length > 0) {
+        let type = null;
+        for (const m of discountsMatchers) {
+          const isMatch = m.matchType === 'exact' ? text === m.alias : text.includes(m.alias);
+          if (isMatch) {
+            if (m.discountType === 'full') return { isDiscount: true, discountType: 'full' };
+            if (m.discountType === 'partial') type = 'partial';
+          }
+        }
+        return { isDiscount: !!type, discountType: type };
+      }
+      // Fallback to static detection
+      const fallbackType = getDiscountType(memo, amount);
+      return { isDiscount: !!fallbackType, discountType: fallbackType };
+    };
+
+    const parsedPayments = paymentsFiltered.map(p => {
+      const amount = parseFloat(p['Amount'] || '0') || 0;
+      const dd = detectDiscount(p['Memo'] || '', amount);
+      return ({
+        date: toDateOnly(p['Date']),
+        customer: p['Customer'] || '',
+        memo: p['Memo'] || '',
+        amount,
+        invoice: p['Invoice'] || '',
+        isDiscount: dd.isDiscount,
+        discountType: dd.discountType,
+      });
+    });
 
     // Exclude full discounts from revenue totals and splits
     const paymentsEffective = parsedPayments.filter(p => p.discountType !== 'full');
@@ -190,9 +264,31 @@ router.post('/calculate', async (req, res) => {
     const groupRevenue = allocatedGroupRevenue;
     const privateRevenue = allocatedPrivateRevenue;
 
-    // Default percentages from Final_Requirement.txt
-    const groupPct = { coach: 43.5, bgm: 30.0, management: 8.5, mfc: 18.0 };
-    const privatePct = { coach: 80.0, landlord: 15.0, management: 0.0, mfc: 5.0 };
+    // Percentages from rules sheet if available, else defaults
+    const parseNum = (v, d = 0) => {
+      const n = parseFloat(String(v).replace('%',''));
+      return isNaN(n) ? d : n;
+    };
+    const groupDefaultRule = (rulesSheet || []).find(r =>
+      (String(getVal(r, ['session_type'])).toLowerCase() === 'group') &&
+      !String(getVal(r, ['package_name'])).trim()
+    );
+    const privateDefaultRule = (rulesSheet || []).find(r =>
+      (String(getVal(r, ['session_type'])).toLowerCase() === 'private') &&
+      !String(getVal(r, ['package_name'])).trim()
+    );
+    const groupPct = groupDefaultRule ? {
+      coach: parseNum(getVal(groupDefaultRule, ['coach_percentage']), 43.5),
+      bgm: parseNum(getVal(groupDefaultRule, ['bgm_percentage']), 30.0),
+      management: parseNum(getVal(groupDefaultRule, ['management_percentage']), 8.5),
+      mfc: parseNum(getVal(groupDefaultRule, ['mfc_percentage']), 18.0),
+    } : { coach: 43.5, bgm: 30.0, management: 8.5, mfc: 18.0 };
+    const privatePct = privateDefaultRule ? {
+      coach: parseNum(getVal(privateDefaultRule, ['coach_percentage']), 80.0),
+      landlord: parseNum(getVal(privateDefaultRule, ['bgm_percentage', 'landlord_percentage']), 15.0),
+      management: parseNum(getVal(privateDefaultRule, ['management_percentage']), 0.0),
+      mfc: parseNum(getVal(privateDefaultRule, ['mfc_percentage']), 5.0),
+    } : { coach: 80.0, landlord: 15.0, management: 0.0, mfc: 5.0 };
 
     const splits = {
       group: {
@@ -250,15 +346,135 @@ router.post('/calculate', async (req, res) => {
       };
     }).sort((a, b) => b.totalPayment - a.totalPayment);
 
+    // Build write payloads for Google Sheets tabs
+    const iso = new Date().toISOString();
+    const calcId = `CALC-${iso.replace(/[-:.TZ]/g, '')}`;
+    const sysVersion = (() => {
+      const row = (settingsSheet || []).find(r => String(getVal(r, ['key'])).toLowerCase() === 'system_version');
+      return row ? String(getVal(row, ['value']) || '1.0.0') : '1.0.0';
+    })();
+
+    const filtersOut = { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, fromDate: from ? from.toISOString().slice(0,10) : null, toDate: to ? to.toISOString().slice(0,10) : null };
+
+    const summaryRows = (coachBreakdown || []).map(row => ({
+      CalcId: calcId,
+      Month: filtersOut.month || '',
+      FromDate: filtersOut.fromDate || '',
+      ToDate: filtersOut.toDate || '',
+      Coach: row.coach,
+      GroupAttendances: row.groupAttendances,
+      PrivateAttendances: row.privateAttendances,
+      GroupGross: '',
+      PrivateGross: '',
+      DiscountsApplied: '',
+      GroupPayment: row.groupPayment,
+      PrivatePayment: row.privatePayment,
+      TotalPayment: row.totalPayment,
+      BgmPayment: '',
+      ManagementPayment: '',
+      MfcRetained: '',
+      Notes: 'Calculated via API',
+      RulesVersion: sysVersion,
+      RunBy: 'api',
+      RunAtISO: iso,
+    }));
+
+    // Minimal detail rows: two per coach (group/private)
+    let rowIdCounter = 1;
+    const detailRows = [];
+    Object.entries(coachUnits).forEach(([name, units]) => {
+      // group
+      detailRows.push({
+        CalcId: calcId,
+        RowId: rowIdCounter++,
+        Date: '',
+        Customer: '',
+        Coach: name,
+        ClassType: '',
+        SessionCategory: 'group',
+        PackageName: '',
+        Invoice: '',
+        PaymentAmount: '',
+        IsDiscount: '',
+        DiscountType: '',
+        DiscountAmount: '',
+        EffectiveAmount: '',
+        RuleId: '',
+        IsFixedRate: '',
+        UnitPrice: '',
+        Units: Number(units.group || 0).toFixed(2),
+        CoachPercent: groupPct.coach,
+        BgmPercent: groupPct.bgm,
+        ManagementPercent: groupPct.management,
+        MfcPercent: groupPct.mfc,
+        CoachAmount: (coachBreakdown.find(r => r.coach === name)?.groupPayment) || 0,
+        BgmAmount: '',
+        ManagementAmount: '',
+        MfcAmount: '',
+        SourceAttendanceRowId: '',
+        SourcePaymentRowId: '',
+        Status: 'calculated',
+        ExceptionFlag: '',
+        ExceptionReason: '',
+        Notes: 'Aggregated row',
+      });
+      // private
+      detailRows.push({
+        CalcId: calcId,
+        RowId: rowIdCounter++,
+        Date: '',
+        Customer: '',
+        Coach: name,
+        ClassType: '',
+        SessionCategory: 'private',
+        PackageName: '',
+        Invoice: '',
+        PaymentAmount: '',
+        IsDiscount: '',
+        DiscountType: '',
+        DiscountAmount: '',
+        EffectiveAmount: '',
+        RuleId: '',
+        IsFixedRate: '',
+        UnitPrice: '',
+        Units: Number(units.private || 0).toFixed(2),
+        CoachPercent: privatePct.coach,
+        BgmPercent: privatePct.landlord,
+        ManagementPercent: privatePct.management,
+        MfcPercent: privatePct.mfc,
+        CoachAmount: (coachBreakdown.find(r => r.coach === name)?.privatePayment) || 0,
+        BgmAmount: '',
+        ManagementAmount: '',
+        MfcAmount: '',
+        SourceAttendanceRowId: '',
+        SourcePaymentRowId: '',
+        Status: 'calculated',
+        ExceptionFlag: '',
+        ExceptionReason: '',
+        Notes: 'Aggregated row',
+      });
+    });
+
+    try {
+      await writeSheet('payment_calculator', summaryRows);
+    } catch (e) {
+      console.error('Failed writing payment_calculator:', e?.message || e);
+    }
+    try {
+      await writeSheet('payment_calc_detail', detailRows);
+    } catch (e) {
+      console.error('Failed writing payment_calc_detail:', e?.message || e);
+    }
+
     return res.json({
       success: true,
-      filters: { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, fromDate: from ? from.toISOString().slice(0,10) : null, toDate: to ? to.toISOString().slice(0,10) : null },
+      filters: filtersOut,
       counts,
       revenue: { totalPayments, groupRevenue: +groupRevenue.toFixed(2), privateRevenue: +privateRevenue.toFixed(2) },
       splits,
       discounts,
       coachBreakdown,
-      notes: 'This is an initial scaffold. Mapping payments to sessions and applying rules comes next.',
+      notes: 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
     });
   } catch (error) {
     console.error('Error calculating payments:', error);
