@@ -179,6 +179,43 @@ router.post('/calculate', async (req, res) => {
       },
     };
 
+    // Coach-level breakdown using attendance weighting
+    const coachUnits = {};
+    groupSessions.forEach(r => {
+      const instructors = (r['Instructors'] || '').split(',').map(s => s.trim()).filter(Boolean);
+      const unit = instructors.length > 0 ? 1 / instructors.length : 1;
+      (instructors.length ? instructors : ['Unassigned']).forEach(name => {
+        if (!coachUnits[name]) coachUnits[name] = { group: 0, private: 0 };
+        coachUnits[name].group += unit;
+      });
+    });
+    privateSessions.forEach(r => {
+      const instructors = (r['Instructors'] || '').split(',').map(s => s.trim()).filter(Boolean);
+      const unit = instructors.length > 0 ? 1 / instructors.length : 1;
+      (instructors.length ? instructors : ['Unassigned']).forEach(name => {
+        if (!coachUnits[name]) coachUnits[name] = { group: 0, private: 0 };
+        coachUnits[name].private += unit;
+      });
+    });
+
+    const totalGroupUnits = Object.values(coachUnits).reduce((s, c) => s + (c.group || 0), 0);
+    const totalPrivateUnits = Object.values(coachUnits).reduce((s, c) => s + (c.private || 0), 0);
+    const groupCoachPool = splits.group.coach;
+    const privateCoachPool = splits.private.coach;
+
+    const coachBreakdown = Object.entries(coachUnits).map(([name, units]) => {
+      const groupPayment = totalGroupUnits > 0 ? +(groupCoachPool * (units.group / totalGroupUnits)).toFixed(2) : 0;
+      const privatePayment = totalPrivateUnits > 0 ? +(privateCoachPool * (units.private / totalPrivateUnits)).toFixed(2) : 0;
+      return {
+        coach: name,
+        groupAttendances: +units.group.toFixed(2),
+        privateAttendances: +units.private.toFixed(2),
+        groupPayment,
+        privatePayment,
+        totalPayment: +(groupPayment + privatePayment).toFixed(2),
+      };
+    }).sort((a, b) => b.totalPayment - a.totalPayment);
+
     return res.json({
       success: true,
       filters: { month: month ? parseInt(month) : null, year: year ? parseInt(year) : null, fromDate: from ? from.toISOString().slice(0,10) : null, toDate: to ? to.toISOString().slice(0,10) : null },
@@ -186,6 +223,7 @@ router.post('/calculate', async (req, res) => {
       revenue: { totalPayments, groupRevenue: +groupRevenue.toFixed(2), privateRevenue: +privateRevenue.toFixed(2) },
       splits,
       discounts,
+      coachBreakdown,
       notes: 'This is an initial scaffold. Mapping payments to sessions and applying rules comes next.',
     });
   } catch (error) {
