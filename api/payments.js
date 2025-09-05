@@ -585,6 +585,44 @@ router.post('/verify', async (req, res) => {
       return 0;
     };
 
+    // Percentages (defaults and per-rule)
+    const parseNum = (v, d = 0) => { const n = parseFloat(String(v).replace('%','')); return isNaN(n) ? d : n; };
+    const groupDefaultRule = (rulesSheet || []).find(r => String(r.session_type || '').toLowerCase() === 'group' && !String(r.package_name || '').trim());
+    const privateDefaultRule = (rulesSheet || []).find(r => String(r.session_type || '').toLowerCase() === 'private' && !String(r.package_name || '').trim());
+    const groupPctDefaults = {
+      coach: parseNum(groupDefaultRule?.coach_percentage, 43.5),
+      bgm: parseNum(groupDefaultRule?.bgm_percentage, 30.0),
+      management: parseNum(groupDefaultRule?.management_percentage, 8.5),
+      mfc: parseNum(groupDefaultRule?.mfc_percentage, 18.0),
+    };
+    const privatePctDefaults = {
+      coach: parseNum(privateDefaultRule?.coach_percentage, 80.0),
+      landlord: parseNum(privateDefaultRule?.bgm_percentage, 15.0),
+      management: parseNum(privateDefaultRule?.management_percentage, 0.0),
+      mfc: parseNum(privateDefaultRule?.mfc_percentage, 5.0),
+    };
+    const getPctForRow = (row) => {
+      const membership = (row['Membership'] || '').toString().toLowerCase();
+      const cat = classifySession(row['ClassType']);
+      const rule = (rulesSheet || []).find(r => String(r.package_name || '').toLowerCase() === membership);
+      if (cat === 'group') {
+        return {
+          coach: parseNum(rule?.coach_percentage, groupPctDefaults.coach),
+          bgm: parseNum(rule?.bgm_percentage, groupPctDefaults.bgm),
+          management: parseNum(rule?.management_percentage, groupPctDefaults.management),
+          mfc: parseNum(rule?.mfc_percentage, groupPctDefaults.mfc),
+          landlord: parseNum(rule?.bgm_percentage, groupPctDefaults.bgm),
+        };
+      }
+      return {
+        coach: parseNum(rule?.coach_percentage, privatePctDefaults.coach),
+        landlord: parseNum(rule?.bgm_percentage, privatePctDefaults.landlord),
+        management: parseNum(rule?.management_percentage, privatePctDefaults.management),
+        mfc: parseNum(rule?.mfc_percentage, privatePctDefaults.mfc),
+        bgm: parseNum(rule?.bgm_percentage, privatePctDefaults.landlord),
+      };
+    };
+
     // Helper: find a likely payment to reference for a given attendance row (nearest in time for same customer)
     const findLinkedPayment = (row) => {
       const customer = (row['Customer'] || '').trim();
@@ -603,6 +641,12 @@ router.post('/verify', async (req, res) => {
       const verified = eff > 0.0001 || unit > 0; // if we can price it or it received allocation
       const category = eff > 0.0001 ? 'ok' : 'info_mismatch';
       const lp = findLinkedPayment(r);
+      const chosen = unit > 0 ? unit : eff; // value used for splits
+      const pct = getPctForRow(r);
+      const coachAmount = +((chosen || 0) * (pct.coach / 100)).toFixed(2);
+      const bgmAmount = +((chosen || 0) * ((classifySession(r['ClassType']) === 'group' ? pct.bgm : pct.landlord) / 100)).toFixed(2);
+      const mgmtAmount = +((chosen || 0) * (pct.management / 100)).toFixed(2);
+      const mfcAmount = +((chosen || 0) * (pct.mfc / 100)).toFixed(2);
       return {
         Date: r['Date'] || '',
         Customer: r['Customer'] || '',
@@ -613,6 +657,10 @@ router.post('/verify', async (req, res) => {
         Category: category,
         UnitPrice: unit,
         EffectiveAmount: eff,
+        CoachAmount: coachAmount,
+        BgmAmount: bgmAmount,
+        ManagementAmount: mgmtAmount,
+        MfcAmount: mfcAmount,
         Invoice: lp ? (lp['Invoice'] || '') : '',
         PaymentDate: lp && lp.__date ? lp.__date.toISOString().slice(0,10) : '',
       };
