@@ -225,46 +225,7 @@ router.post('/calculate', async (req, res) => {
       partialAmount: parsedPayments.filter(p => p.discountType === 'partial').reduce((s, p) => s + (p.amount || 0), 0),
     };
 
-    // Proportional revenue allocation by session counts (heuristic until session-payment mapping is implemented)
-    // Allocate payments to group/private by customer's session mix within range
-    const customerSessions = {};
-    attendanceFiltered.forEach(r => {
-      const customer = (r['Customer'] || '').trim();
-      const type = classifySession(r['ClassType']);
-      if (!customerSessions[customer]) customerSessions[customer] = { group: 0, private: 0 };
-      customerSessions[customer][type] += 1;
-    });
-
-    const totalSessions = counts.groupSessions + counts.privateSessions;
-    let allocatedGroupRevenue = 0;
-    let allocatedPrivateRevenue = 0;
-    let unassignedAmount = 0;
-
-    paymentsEffective.forEach(p => {
-      const stats = customerSessions[(p.customer || '').trim()];
-      if (stats) {
-        const cTotal = (stats.group || 0) + (stats.private || 0);
-        if (cTotal > 0) {
-          allocatedGroupRevenue += p.amount * (stats.group / cTotal);
-          allocatedPrivateRevenue += p.amount * (stats.private / cTotal);
-        } else {
-          unassignedAmount += p.amount;
-        }
-      } else {
-        unassignedAmount += p.amount;
-      }
-    });
-
-    if (unassignedAmount > 0) {
-      const globalGroupShare = totalSessions > 0 ? (counts.groupSessions / totalSessions) : 1;
-      allocatedGroupRevenue += unassignedAmount * globalGroupShare;
-      allocatedPrivateRevenue += unassignedAmount * (1 - globalGroupShare);
-    }
-
-    const groupRevenue = allocatedGroupRevenue;
-    const privateRevenue = allocatedPrivateRevenue;
-
-    // Percentages from rules sheet if available, else defaults
+    // Percentages from rules sheet (global defaults) if available, else hard defaults
     const parseNum = (v, d = 0) => {
       const n = parseFloat(String(v).replace('%',''));
       return isNaN(n) ? d : n;
@@ -277,36 +238,42 @@ router.post('/calculate', async (req, res) => {
       (String(getVal(r, ['session_type'])).toLowerCase() === 'private') &&
       !String(getVal(r, ['package_name'])).trim()
     );
-    const groupPct = groupDefaultRule ? {
+    const groupPctDefaults = groupDefaultRule ? {
       coach: parseNum(getVal(groupDefaultRule, ['coach_percentage']), 43.5),
       bgm: parseNum(getVal(groupDefaultRule, ['bgm_percentage']), 30.0),
       management: parseNum(getVal(groupDefaultRule, ['management_percentage']), 8.5),
       mfc: parseNum(getVal(groupDefaultRule, ['mfc_percentage']), 18.0),
     } : { coach: 43.5, bgm: 30.0, management: 8.5, mfc: 18.0 };
-    const privatePct = privateDefaultRule ? {
+    const privatePctDefaults = privateDefaultRule ? {
       coach: parseNum(getVal(privateDefaultRule, ['coach_percentage']), 80.0),
       landlord: parseNum(getVal(privateDefaultRule, ['bgm_percentage', 'landlord_percentage']), 15.0),
       management: parseNum(getVal(privateDefaultRule, ['management_percentage']), 0.0),
       mfc: parseNum(getVal(privateDefaultRule, ['mfc_percentage']), 5.0),
     } : { coach: 80.0, landlord: 15.0, management: 0.0, mfc: 5.0 };
 
-    const splits = {
-      group: {
-        revenue: groupRevenue,
-        coach: +(groupRevenue * groupPct.coach / 100).toFixed(2),
-        bgm: +(groupRevenue * groupPct.bgm / 100).toFixed(2),
-        management: +(groupRevenue * groupPct.management / 100).toFixed(2),
-        mfc: +(groupRevenue * groupPct.mfc / 100).toFixed(2),
-        percentage: groupPct,
-      },
-      private: {
-        revenue: privateRevenue,
-        coach: +(privateRevenue * privatePct.coach / 100).toFixed(2),
-        landlord: +(privateRevenue * privatePct.landlord / 100).toFixed(2),
-        management: +(privateRevenue * privatePct.management / 100).toFixed(2),
-        mfc: +(privateRevenue * privatePct.mfc / 100).toFixed(2),
-        percentage: privatePct,
-      },
+    // Helper to get rule and unit price for a row
+    const getRuleForRow = (row) => {
+      const membership = (row['Membership'] || '').toString().toLowerCase();
+      const sessionType = classifySession(row['ClassType']) === 'private' ? 'private' : 'group';
+      let rule = (rulesSheet || []).find(r => String(r.package_name || '').toLowerCase() === membership);
+      if (!rule) {
+        rule = (rulesSheet || []).find(r => String(r.session_type || '').toLowerCase() === sessionType && !String(r.package_name || '').trim());
+      }
+      return rule || {};
+    };
+    const getUnitPrice = (row, rule) => {
+      const unit = parseFloat(String(rule?.unit_price || ''));
+      const price = parseFloat(String(rule?.price || ''));
+      const sessions = parseFloat(String(rule?.sessions_per_pack || rule?.sessions || ''));
+      if (!isNaN(unit) && unit > 0) return unit;
+      if (!isNaN(price) && !isNaN(sessions) && sessions > 0) return +(price / sessions).toFixed(2);
+      return 0;
+    };
+
+    // Row-level computation using unit price
+    const totals = {
+      group: { revenue: 0, coach: 0, bgm: 0, management: 0, mfc: 0 },
+      private: { revenue: 0, coach: 0, landlord: 0, management: 0, mfc: 0 },
     };
 
     // Map payments to sessions per customer and build per-attendance effective amounts
@@ -346,10 +313,14 @@ router.post('/calculate', async (req, res) => {
     const coachGross = {};
     const detailTemp = attendanceWithIdx.map(r => {
       const cat = classifySession(r['ClassType']);
-      const eff = +(effectiveByIdx.get(r.__idx) || 0).toFixed(2);
+      // Use expected unit price for revenue recognition when available
+      const rule = getRuleForRow(r);
+      const unitFromRule = getUnitPrice(r, rule);
+      const effAllocated = +(effectiveByIdx.get(r.__idx) || 0).toFixed(2);
+      const eff = unitFromRule > 0 ? unitFromRule : effAllocated;
       const instructors = (r['Instructors'] || '').split(',').map(s => s.trim()).filter(Boolean);
       const numInst = Math.max(1, instructors.length);
-      const pct = cat === 'group' ? groupPct : privatePct;
+      const pct = cat === 'group' ? groupPctDefaults : privatePctDefaults;
       const coachAmt = +(eff * (pct.coach / 100)).toFixed(2);
       const bgmAmt = +(eff * ((cat === 'group' ? pct.bgm : pct.landlord) / 100)).toFixed(2);
       const mgmtAmt = +(eff * (pct.management / 100)).toFixed(2);
@@ -385,7 +356,7 @@ router.post('/calculate', async (req, res) => {
         EffectiveAmount: eff,
         RuleId: '',
         IsFixedRate: '',
-        UnitPrice: '',
+        UnitPrice: unitFromRule,
         Units: (1 / numInst).toFixed(2),
         CoachPercent: pct.coach,
         BgmPercent: cat === 'group' ? pct.bgm : pct.landlord,
@@ -404,13 +375,52 @@ router.post('/calculate', async (req, res) => {
       };
     });
 
+    // Accumulate totals by category using row-level eff
+    detailTemp.forEach(row => {
+      if (row.SessionCategory === 'group') {
+        totals.group.revenue += row.EffectiveAmount || 0;
+        totals.group.coach += row.CoachAmount || 0;
+        totals.group.bgm += row.BgmAmount || 0;
+        totals.group.management += row.ManagementAmount || 0;
+        totals.group.mfc += row.MfcAmount || 0;
+      } else {
+        totals.private.revenue += row.EffectiveAmount || 0;
+        totals.private.coach += row.CoachAmount || 0;
+        totals.private.landlord += row.BgmAmount || 0;
+        totals.private.management += row.ManagementAmount || 0;
+        totals.private.mfc += row.MfcAmount || 0;
+      }
+    });
+
+    const groupRevenue = +totals.group.revenue.toFixed(2);
+    const privateRevenue = +totals.private.revenue.toFixed(2);
+
+    const splits = {
+      group: {
+        revenue: groupRevenue,
+        coach: +totals.group.coach.toFixed(2),
+        bgm: +totals.group.bgm.toFixed(2),
+        management: +totals.group.management.toFixed(2),
+        mfc: +totals.group.mfc.toFixed(2),
+        percentage: groupPctDefaults,
+      },
+      private: {
+        revenue: privateRevenue,
+        coach: +totals.private.coach.toFixed(2),
+        landlord: +totals.private.landlord.toFixed(2),
+        management: +totals.private.management.toFixed(2),
+        mfc: +totals.private.mfc.toFixed(2),
+        percentage: privatePctDefaults,
+      },
+    };
+
     // Build coach breakdown from coachGross
     const coachBreakdown = Object.entries(coachGross).map(([name, g]) => {
-      const groupPayment = +((g.groupGross || 0) * (groupPct.coach / 100)).toFixed(2);
-      const privatePayment = +((g.privateGross || 0) * (privatePct.coach / 100)).toFixed(2);
-      const bgmPayment = +(((g.groupGross || 0) * (groupPct.bgm / 100)) + ((g.privateGross || 0) * (privatePct.landlord / 100))).toFixed(2);
-      const managementPayment = +(((g.groupGross || 0) * (groupPct.management / 100)) + ((g.privateGross || 0) * (privatePct.management / 100))).toFixed(2);
-      const mfcRetained = +(((g.groupGross || 0) * (groupPct.mfc / 100)) + ((g.privateGross || 0) * (privatePct.mfc / 100))).toFixed(2);
+      const groupPayment = +((g.groupGross || 0) * (groupPctDefaults.coach / 100)).toFixed(2);
+      const privatePayment = +((g.privateGross || 0) * (privatePctDefaults.coach / 100)).toFixed(2);
+      const bgmPayment = +(((g.groupGross || 0) * (groupPctDefaults.bgm / 100)) + ((g.privateGross || 0) * (privatePctDefaults.landlord / 100))).toFixed(2);
+      const managementPayment = +(((g.groupGross || 0) * (groupPctDefaults.management / 100)) + ((g.privateGross || 0) * (privatePctDefaults.management / 100))).toFixed(2);
+      const mfcRetained = +(((g.groupGross || 0) * (groupPctDefaults.mfc / 100)) + ((g.privateGross || 0) * (privatePctDefaults.mfc / 100))).toFixed(2);
       return {
         coach: name,
         groupAttendances: +(g.groupUnits || 0).toFixed(2),
