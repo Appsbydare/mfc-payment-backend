@@ -499,6 +499,113 @@ router.post('/calculate', async (req, res) => {
   }
 });
 
+// @desc    Verify payments against attendance (row-level)
+// @route   POST /payments/verify
+// @access  Private
+router.post('/verify', async (req, res) => {
+  try {
+    const { month, year, fromDate, toDate } = req.body || {};
+    const from = toDateOnly(fromDate);
+    const to = toDateOnly(toDate);
+
+    const [attendance, payments, rulesSheet] = await Promise.all([
+      readSheet('attendance'),
+      readSheet('payments'),
+      readSheet('rules').catch(() => []),
+    ]);
+
+    const inWindow = (d) => {
+      if (!d) return false;
+      if (from || to) return inRange(d, from, to);
+      if (!month && !year) return true;
+      return monthYearMatch(d, month, year);
+    };
+
+    const attendanceFiltered = attendance
+      .map(r => ({ ...r, __date: toDateOnly(r['Date']) }))
+      .filter(r => inWindow(r.__date));
+
+    const paymentsFiltered = payments
+      .map(p => ({ ...p, __date: toDateOnly(p['Date']), __amount: parseFloat(p['Amount'] || '0') || 0 }))
+      .filter(p => inWindow(p.__date));
+
+    // Build per-customer attendance buckets
+    const buckets = {};
+    attendanceFiltered.forEach(r => {
+      const customer = (r['Customer'] || '').trim();
+      const cat = classifySession(r['ClassType']);
+      if (!buckets[customer]) buckets[customer] = { group: [], private: [] };
+      buckets[customer][cat].push(r);
+    });
+
+    // Allocate payments proportionally by customer's session mix
+    const effectiveByRow = new Map();
+    const unassigned = [];
+    paymentsFiltered.forEach(p => {
+      const customer = (p['Customer'] || '').trim();
+      const b = buckets[customer];
+      const gCount = b ? b.group.length : 0;
+      const pCount = b ? b.private.length : 0;
+      const total = gCount + pCount;
+      if (total === 0) { unassigned.push(p); return; }
+      const gShare = gCount > 0 ? p.__amount * (gCount / total) : 0;
+      const prShare = pCount > 0 ? p.__amount * (pCount / total) : 0;
+      const perG = gCount > 0 ? gShare / gCount : 0;
+      const perP = pCount > 0 ? prShare / pCount : 0;
+      (b.group || []).forEach(r => effectiveByRow.set(r, (effectiveByRow.get(r) || 0) + perG));
+      (b.private || []).forEach(r => effectiveByRow.set(r, (effectiveByRow.get(r) || 0) + perP));
+    });
+
+    // Helper to derive expected unit price from rules
+    const getUnitPrice = (row) => {
+      const membership = (row['Membership'] || '').toString().toLowerCase();
+      const cat = classifySession(row['ClassType']);
+      // exact match by package_name first
+      let rule = (rulesSheet || []).find(r => String(r.package_name || '').toLowerCase() === membership);
+      if (!rule) {
+        // fallback: default by session_type
+        rule = (rulesSheet || []).find(r => String(r.session_type || '').toLowerCase() === (cat === 'private' ? 'private' : 'group') && !String(r.package_name || '').trim());
+      }
+      const unit = parseFloat(String(rule?.unit_price || ''));
+      const price = parseFloat(String(rule?.price || ''));
+      const sessions = parseFloat(String(rule?.sessions_per_pack || rule?.sessions || ''));
+      if (!isNaN(unit) && unit > 0) return unit;
+      if (!isNaN(price) && !isNaN(sessions) && sessions > 0) return +(price / sessions).toFixed(2);
+      return 0;
+    };
+
+    const rows = attendanceFiltered.map(r => {
+      const eff = +(effectiveByRow.get(r) || 0).toFixed(2);
+      const unit = getUnitPrice(r);
+      const verified = eff > 0.0001 || unit > 0; // if we can price it or it received allocation
+      const category = eff > 0.0001 ? 'ok' : 'info_mismatch';
+      return {
+        Date: r['Date'] || '',
+        Customer: r['Customer'] || '',
+        ClassType: r['ClassType'] || '',
+        Instructors: r['Instructors'] || '',
+        Membership: r['Membership'] || '',
+        Verified: verified,
+        Category: category,
+        UnitPrice: unit,
+        EffectiveAmount: eff,
+      };
+    });
+
+    const summary = {
+      attendanceCount: rows.length,
+      unassignedPayments: unassigned.length,
+      unassignedAmount: +unassigned.reduce((s, p) => s + (p.__amount || 0), 0).toFixed(2),
+      verifiedCount: rows.filter(r => r.Verified).length,
+    };
+
+    return res.json({ success: true, rows, summary });
+  } catch (e) {
+    console.error('Error verifying payments:', e);
+    return res.status(500).json({ success: false, message: 'Failed to verify payments' });
+  }
+});
+
 // @desc    Get payment history (placeholder)
 router.get('/history', (req, res) => {
   res.json({ message: 'Get payment history route - TODO' });
