@@ -349,13 +349,14 @@ router.post('/calculate', async (req, res) => {
         SessionCategory: cat,
         PackageName: r['Membership'] || '',
         Invoice: '',
-        PaymentAmount: '',
+        PaymentAmount: effAllocated,
         IsDiscount: '',
         DiscountType: '',
         DiscountAmount: '',
         EffectiveAmount: eff,
-        RuleId: '',
-        IsFixedRate: '',
+        RuleId: String(rule?.id || ''),
+        IsFixedRate: String(rule?.is_fixed_rate || ''),
+        PackagePrice: rule && rule.price ? +parseFloat(String(rule.price)).toFixed(2) : '',
         UnitPrice: unitFromRule,
         Units: (1 / numInst).toFixed(2),
         CoachPercent: pct.coach,
@@ -584,11 +585,24 @@ router.post('/verify', async (req, res) => {
       return 0;
     };
 
+    // Helper: find a likely payment to reference for a given attendance row (nearest in time for same customer)
+    const findLinkedPayment = (row) => {
+      const customer = (row['Customer'] || '').trim();
+      const pays = paymentsFiltered.filter(p => (p['Customer'] || '').trim() === customer);
+      if (pays.length === 0) return null;
+      const d = toDateOnly(row['Date']);
+      // Prefer latest payment on or before the class date; otherwise closest after
+      const onOrBefore = pays.filter(p => p.__date && d && p.__date <= d).sort((a,b) => b.__date - a.__date);
+      const pick = onOrBefore[0] || pays.sort((a,b) => Math.abs((a.__date||0) - d) - Math.abs((b.__date||0) - d))[0];
+      return pick || null;
+    };
+
     const rows = attendanceFiltered.map(r => {
       const eff = +(effectiveByRow.get(r) || 0).toFixed(2);
       const unit = getUnitPrice(r);
       const verified = eff > 0.0001 || unit > 0; // if we can price it or it received allocation
       const category = eff > 0.0001 ? 'ok' : 'info_mismatch';
+      const lp = findLinkedPayment(r);
       return {
         Date: r['Date'] || '',
         Customer: r['Customer'] || '',
@@ -599,6 +613,8 @@ router.post('/verify', async (req, res) => {
         Category: category,
         UnitPrice: unit,
         EffectiveAmount: eff,
+        Invoice: lp ? (lp['Invoice'] || '') : '',
+        PaymentDate: lp && lp.__date ? lp.__date.toISOString().slice(0,10) : '',
       };
     });
 
