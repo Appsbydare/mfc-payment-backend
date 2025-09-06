@@ -14,6 +14,7 @@ import authRoutes from './routes/auth';
 import dataRoutes from './routes/data';
 import paymentsRoutes from './routes/payments';
 import reportsRoutes from './routes/reports';
+import verificationRoutes from './routes/verification';
 
 // Load environment variables
 dotenv.config();
@@ -66,6 +67,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/verification', verificationRoutes);
 
 // 404 handler
 app.use(notFound);

@@ -17,8 +17,8 @@ router.post('/import', upload.fields([
   try {
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     const results = {
-      attendance: { processed: 0, duplicates: 0, added: 0, errors: [] as string[] },
-      payments: { processed: 0, duplicates: 0, added: 0, errors: [] as string[] }
+      attendance: { processed: 0, added: 0, errors: [] as string[] },
+      payments: { processed: 0, added: 0, errors: [] as string[] }
     };
 
     // Process attendance data
@@ -34,6 +34,7 @@ router.post('/import', upload.fields([
           console.log('Customer Name value from CSV:', (parsedData.data[0] as any)['Customer Name']);
           
           // Transform attendance data to match expected Google Sheets format
+          const importTimestamp = new Date().toISOString();
           const transformedData = parsedData.data.map((row: any, index: number) => {
             const transformed = {
               'Customer': row['Customer Name'] || '',
@@ -47,7 +48,13 @@ router.post('/import', upload.fields([
               'Membership': row['Membership Name'] || '',
               'BookingSource': row['Booking Source'] || '',
               'Status': row['Status'] || '',
-              'CheckinTimestamp': row['Checkin Timestamp'] || ''
+              'CheckinTimestamp': row['Checkin Timestamp'] || '',
+              'ImportTimestamp': importTimestamp,
+              'VerificationStatus': 'Pending', // Default status
+              'Category': 'Pending', // Default category
+              'InvoiceNumber': '', // Will be filled during verification
+              'ManualVerificationDate': '', // Will be filled if manually verified
+              'LinkedPaymentIds': '' // Will store comma-separated payment IDs
             };
             
             // Debug: Log the first transformed row
@@ -69,29 +76,6 @@ router.post('/import', upload.fields([
 
           // Clear the sheet first, then write new data
           await googleSheetsService.clearSheet('attendance');
-          
-          // Test with a simple data structure first
-          const testData = [
-            {
-              'Customer': 'Test Customer',
-              'Email': 'test@example.com',
-              'Date': '2025-01-01',
-              'Time': '10:00:00',
-              'ClassType': 'Test Class',
-              'Venue': 'Test Venue',
-              'Instructors': 'Test Instructor',
-              'BookingMethod': 'Test Method',
-              'Membership': 'Test Membership',
-              'BookingSource': 'Test Source',
-              'Status': 'Test Status',
-              'CheckinTimestamp': 'Test Timestamp'
-            }
-          ];
-          
-          console.log('Testing with simple data first...');
-          await googleSheetsService.writeSheet('attendance', testData);
-          
-          console.log('Now writing actual transformed data...');
           await googleSheetsService.writeSheet('attendance', transformedData);
           
           results.attendance.processed = transformedData.length;
@@ -111,12 +95,18 @@ router.post('/import', upload.fields([
         
         if (parsedData.data && parsedData.data.length > 0) {
           // Transform payment data to match expected Google Sheets format
+          const importTimestamp = new Date().toISOString();
           const transformedData = parsedData.data.map((row: any) => ({
             'Date': row['Date'] || '',
             'Customer': row['Customer'] || '',
             'Memo': row['Memo'] || '',
             'Amount': parseFloat(row['Amount']) || 0,
-            'Invoice': row['Invoice'] || ''
+            'Invoice': row['Invoice'] || '',
+            'ImportTimestamp': importTimestamp,
+            'VerificationStatus': 'Unverified', // Default status
+            'Category': 'Payment', // Default category (can be Discount, Tax, etc.)
+            'LinkedAttendanceIds': '', // Will store comma-separated attendance IDs
+            'IsVerified': false // Boolean flag for quick filtering
           }));
           
           // Clear the sheet first, then write new data
@@ -144,8 +134,8 @@ router.post('/import', upload.fields([
       success: false,
       message: error instanceof Error ? error.message : 'Import failed',
       results: {
-        attendance: { processed: 0, duplicates: 0, added: 0, errors: [error instanceof Error ? error.message : 'Unknown error'] },
-        payments: { processed: 0, duplicates: 0, added: 0, errors: [error instanceof Error ? error.message : 'Unknown error'] }
+        attendance: { processed: 0, added: 0, errors: [error instanceof Error ? error.message : 'Unknown error'] },
+        payments: { processed: 0, added: 0, errors: [error instanceof Error ? error.message : 'Unknown error'] }
       }
     });
   }
