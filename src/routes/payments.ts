@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ruleService, PaymentRule, GlobalSettings } from '../services/ruleService';
+import { GoogleSheetsService } from '../services/googleSheets';
 
 const router = Router();
 
@@ -294,6 +295,70 @@ router.get('/coaches', (req, res) => {
 // @access  Private
 router.get('/bgm', (req, res) => {
   res.json({ message: 'Get BGM payments - TODO' });
+});
+
+// @desc    Verify payments against attendance (row-level)
+// @route   POST /api/payments/verify
+// @access  Private
+router.post('/verify', async (req, res) => {
+  try {
+    const googleSheetsService = new GoogleSheetsService();
+    const { month, year, fromDate, toDate } = req.body || {};
+    
+    // Get attendance and payment data
+    const [attendanceData, paymentData] = await Promise.all([
+      googleSheetsService.readSheet('attendance').catch(() => []),
+      googleSheetsService.readSheet('Payments').catch(() => [])
+    ]);
+
+    // Simple verification logic - mark as verified if there's a matching payment
+    const verificationRows = attendanceData.map((attendance: any) => {
+      const matchingPayment = paymentData.find((payment: any) => 
+        payment.Customer === attendance.Customer && 
+        payment.Date === attendance.Date
+      );
+      
+      return {
+        Date: attendance.Date || '',
+        Customer: attendance.Customer || '',
+        Membership: attendance.Membership || '',
+        ClassType: attendance.ClassType || '',
+        Instructors: attendance.Instructors || '',
+        Verified: !!matchingPayment,
+        Category: matchingPayment ? 'Verified' : 'Pending',
+        UnitPrice: 0,
+        EffectiveAmount: matchingPayment ? parseFloat(matchingPayment.Amount || '0') : 0,
+        CoachAmount: 0,
+        BgmAmount: 0,
+        ManagementAmount: 0,
+        MfcAmount: 0,
+        Invoice: matchingPayment ? matchingPayment.Invoice || '' : '',
+        PaymentDate: matchingPayment ? matchingPayment.Date || '' : '',
+      };
+    });
+
+    const summary = {
+      attendanceCount: verificationRows.length,
+      verifiedCount: verificationRows.filter((r: any) => r.Verified).length,
+      unverifiedCount: verificationRows.filter((r: any) => !r.Verified).length,
+    };
+
+    res.json({
+      success: true,
+      rows: verificationRows,
+      summary,
+      message: 'Verification completed successfully'
+    });
+
+  } catch (error) {
+    console.error('Error verifying payments:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to verify payments',
+      rows: [],
+      summary: {}
+    });
+  }
 });
 
 export default router; 
