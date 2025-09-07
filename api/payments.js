@@ -54,7 +54,7 @@ async function writeSheet(sheetName, data) {
     range: `${sheetName}!A:Z`,
   });
 
-  // Append new
+  // Append new data
   await sheets.spreadsheets.values.append({
     spreadsheetId,
     range: `${sheetName}!A1`,
