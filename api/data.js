@@ -260,6 +260,18 @@ router.post('/import', upload.fields([
         // Update Google Sheets
         await updateGoogleSheets('attendance', allAttendanceData);
 
+        // Mark verification state as dirty so UI can indicate unverified data exists
+        try {
+          const existingSettings = await getExistingData('settings').catch(() => []);
+          const map = new Map(existingSettings.map(r => [String(r.key || r.Key).toLowerCase(), r]));
+          const setVal = (k, v) => map.set(k.toLowerCase(), { key: k, value: String(v) });
+          setVal('has_unverified_data', 'true');
+          setVal('unverified_reason', 'attendance_import');
+          await updateGoogleSheets('settings', Array.from(map.values()));
+        } catch (e) {
+          console.error('Failed to flag unverified state after attendance import:', e);
+        }
+
         // Append duplicates to the duplicates sheet for later review
         await appendDuplicatesToSheet(attendanceResult.duplicates, 'attendance');
 
@@ -295,6 +307,18 @@ router.post('/import', upload.fields([
 
         // Update Google Sheets
         await updateGoogleSheets('payments', allPaymentData);
+
+        // Mark verification state as dirty
+        try {
+          const existingSettings = await getExistingData('settings').catch(() => []);
+          const map = new Map(existingSettings.map(r => [String(r.key || r.Key).toLowerCase(), r]));
+          const setVal = (k, v) => map.set(k.toLowerCase(), { key: k, value: String(v) });
+          setVal('has_unverified_data', 'true');
+          setVal('unverified_reason', 'payments_import');
+          await updateGoogleSheets('settings', Array.from(map.values()));
+        } catch (e) {
+          console.error('Failed to flag unverified state after payments import:', e);
+        }
 
         // Append duplicates to the duplicates sheet for later review
         await appendDuplicatesToSheet(paymentResult.duplicates, 'payments');

@@ -673,6 +673,45 @@ router.post('/verify', async (req, res) => {
       verifiedCount: rows.filter(r => r.Verified).length,
     };
 
+    // Persist verification results to Google Sheets for later fast loading
+    try {
+      const runAtIso = new Date().toISOString();
+      const rowsWithMeta = rows.map(r => ({ ...r, RunAtISO: runAtIso }));
+      await writeSheet('attendance_verification', rowsWithMeta);
+
+      // Update settings with last verification timestamp for change detection
+      let settings = [];
+      try {
+        settings = await readSheet('settings');
+      } catch (e) {
+        settings = [];
+      }
+      const keyIndex = (arr, key) => arr.findIndex(x => String(x.key || x.Key).toLowerCase() === String(key).toLowerCase());
+      const setSetting = (k, v) => {
+        const idx = keyIndex(settings, k);
+        if (idx >= 0) {
+          const row = settings[idx];
+          settings[idx] = { ...(row.key ? row : { key: row.Key, value: row.Value }), key: k, value: String(v) };
+        } else {
+          settings.push({ key: k, value: String(v) });
+        }
+      };
+
+      setSetting('last_verification_iso', runAtIso);
+      if (fromDate) setSetting('last_verification_fromDate', fromDate);
+      if (toDate) setSetting('last_verification_toDate', toDate);
+      if (month) setSetting('last_verification_month', month);
+      if (year) setSetting('last_verification_year', year);
+
+      try {
+        await writeSheet('settings', settings);
+      } catch (e) {
+        console.error('Failed updating settings with last verification timestamp:', e?.message || e);
+      }
+    } catch (persistErr) {
+      console.error('Failed persisting attendance verification:', persistErr?.message || persistErr);
+    }
+
     return res.json({ success: true, rows, summary });
   } catch (e) {
     console.error('Error verifying payments:', e);
