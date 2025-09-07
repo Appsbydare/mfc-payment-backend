@@ -89,7 +89,7 @@ router.get('/summary', async (req, res) => {
       return monthYearMatch(d, month, year);
     });
 
-    // Simple verification logic
+    // Enhanced verification logic with payment verification
     const verificationRows = attendanceFiltered.map(attendance => {
       const matchingPayment = paymentsFiltered.find(payment => 
         payment.Customer === attendance.Customer && 
@@ -99,7 +99,7 @@ router.get('/summary', async (req, res) => {
       return {
         ...attendance,
         Verified: !!matchingPayment,
-        Category: matchingPayment ? 'Verified' : 'Pending',
+        Category: matchingPayment ? 'Verified' : 'No payment record',
         UnitPrice: 0,
         EffectiveAmount: matchingPayment ? parseFloat(matchingPayment.Amount || '0') : 0,
         CoachAmount: 0,
@@ -111,23 +111,116 @@ router.get('/summary', async (req, res) => {
       };
     });
 
-    const summary = {
-      totalRecords: verificationRows.length,
-      verifiedRecords: verificationRows.filter(r => r.Verified).length,
-      unverifiedRecords: verificationRows.filter(r => !r.Verified).length,
-      manuallyVerifiedRecords: verificationRows.filter(r => r.Category === 'Manually Verified').length,
-      totalDiscountedAmount: 0,
-      totalTaxAmount: 0,
-      totalFuturePaymentsMFC: 0,
-      totalVerifiedAmount: verificationRows.filter(r => r.Verified).reduce((sum, r) => sum + (r.EffectiveAmount || 0), 0),
-      totalUnverifiedAmount: verificationRows.filter(r => !r.Verified).reduce((sum, r) => sum + (r.EffectiveAmount || 0), 0),
-      verificationCompletionRate: verificationRows.length > 0 ? (verificationRows.filter(r => r.Verified).length / verificationRows.length) * 100 : 0,
-      mfcRetentionRate: 0,
-      categoryBreakdown: {
-        verified: verificationRows.filter(r => r.Verified).length,
-        pending: verificationRows.filter(r => !r.Verified).length,
-        manuallyVerified: verificationRows.filter(r => r.Category === 'Manually Verified').length,
+    // Payment verification analysis
+    const paymentVerificationRows = paymentsFiltered.map(payment => {
+      let category = payment.Category || 'Payment';
+      let isVerified = payment.IsVerified === 'true' || payment.IsVerified === true;
+
+      // Apply verification rules
+      if (payment.Memo && payment.Memo.toLowerCase().includes('fee')) {
+        category = 'Tax';
+        isVerified = true;
       }
+
+      // Check for 100% Discount (same day, same customer, same amount with opposite signs)
+      const sameRecords = paymentsFiltered.filter(p => 
+        p.Date === payment.Date && 
+        p.Customer === payment.Customer && 
+        Math.abs(parseFloat(p.Amount || '0')) === Math.abs(parseFloat(payment.Amount || '0'))
+      );
+
+      if (sameRecords.length >= 2) {
+        const amounts = sameRecords.map(p => parseFloat(p.Amount || '0'));
+        const hasPositive = amounts.some(a => a > 0);
+        const hasNegative = amounts.some(a => a < 0);
+        
+        if (hasPositive && hasNegative) {
+          category = '100% Discount';
+          isVerified = true;
+        }
+      }
+
+      return {
+        ...payment,
+        Category: category,
+        IsVerified: isVerified,
+        Amount: parseFloat(payment.Amount || '0')
+      };
+    });
+
+    // Calculate comprehensive metrics
+    const attendanceVerified = verificationRows.filter(r => r.Verified).length;
+    const attendanceTotal = verificationRows.length;
+    const attendanceVerificationRate = attendanceTotal > 0 ? (attendanceVerified / attendanceTotal) * 100 : 0;
+
+    const paymentVerified = paymentVerificationRows.filter(p => p.IsVerified).length;
+    const paymentTotal = paymentVerificationRows.length;
+    const paymentVerificationRate = paymentTotal > 0 ? (paymentVerified / paymentTotal) * 100 : 0;
+
+    // Payment category breakdown
+    const paymentCategories = {
+      payment: paymentVerificationRows.filter(p => p.Category === 'Payment').length,
+      discount: paymentVerificationRows.filter(p => p.Category === 'Discount').length,
+      fullDiscount: paymentVerificationRows.filter(p => p.Category === '100% Discount').length,
+      tax: paymentVerificationRows.filter(p => p.Category === 'Tax').length,
+      refund: paymentVerificationRows.filter(p => p.Category === 'Refund').length,
+      fee: paymentVerificationRows.filter(p => p.Category === 'Fee').length,
+    };
+
+    // Financial calculations
+    const totalDiscountedAmount = paymentVerificationRows
+      .filter(p => p.Category === 'Discount' || p.Category === '100% Discount')
+      .reduce((sum, p) => sum + Math.abs(p.Amount), 0);
+
+    const totalTaxAmount = paymentVerificationRows
+      .filter(p => p.Category === 'Tax')
+      .reduce((sum, p) => sum + p.Amount, 0);
+
+    const totalVerifiedAmount = paymentVerificationRows
+      .filter(p => p.IsVerified)
+      .reduce((sum, p) => sum + p.Amount, 0);
+
+    const totalUnverifiedAmount = paymentVerificationRows
+      .filter(p => !p.IsVerified)
+      .reduce((sum, p) => sum + p.Amount, 0);
+
+    const summary = {
+      // Attendance metrics
+      totalAttendanceRecords: attendanceTotal,
+      verifiedAttendanceRecords: attendanceVerified,
+      unverifiedAttendanceRecords: attendanceTotal - attendanceVerified,
+      attendanceVerificationRate: Math.round(attendanceVerificationRate * 100) / 100,
+      
+      // Payment metrics  
+      totalPaymentRecords: paymentTotal,
+      verifiedPaymentRecords: paymentVerified,
+      unverifiedPaymentRecords: paymentTotal - paymentVerified,
+      paymentVerificationRate: Math.round(paymentVerificationRate * 100) / 100,
+      
+      // Legacy fields for compatibility
+      totalRecords: attendanceTotal,
+      verifiedRecords: attendanceVerified,
+      unverifiedRecords: attendanceTotal - attendanceVerified,
+      manuallyVerifiedRecords: verificationRows.filter(r => r.Category === 'Manually Verified').length,
+      
+      // Financial metrics
+      totalDiscountedAmount: Math.round(totalDiscountedAmount * 100) / 100,
+      totalTaxAmount: Math.round(totalTaxAmount * 100) / 100,
+      totalFuturePaymentsMFC: Math.round(totalUnverifiedAmount * 100) / 100,
+      totalVerifiedAmount: Math.round(totalVerifiedAmount * 100) / 100,
+      totalUnverifiedAmount: Math.round(totalUnverifiedAmount * 100) / 100,
+      verificationCompletionRate: Math.round(attendanceVerificationRate * 100) / 100,
+      mfcRetentionRate: totalVerifiedAmount > 0 ? Math.round((totalUnverifiedAmount / (totalVerifiedAmount + totalUnverifiedAmount)) * 10000) / 100 : 0,
+      
+      // Enhanced category breakdown
+      categoryBreakdown: {
+        verified: attendanceVerified,
+        pending: attendanceTotal - attendanceVerified,
+        manuallyVerified: verificationRows.filter(r => r.Category === 'Manually Verified').length,
+      },
+      
+      // Payment category breakdown
+      paymentCategoryBreakdown: paymentCategories
     };
 
     res.json({

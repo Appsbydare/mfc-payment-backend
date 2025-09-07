@@ -153,8 +153,23 @@ router.post('/calculate', async (req, res) => {
       return monthYearMatch(d, month, year);
     });
 
-    const groupSessions = attendanceFiltered.filter(r => classifySession(r['ClassType']) === 'group');
-    const privateSessions = attendanceFiltered.filter(r => classifySession(r['ClassType']) === 'private');
+    // Only use verified attendance data for calculations (based on customer requirements)
+    // Verified means we have a matching payment record
+    const verifiedAttendance = attendanceFiltered.filter(attendance => {
+      const matchingPayment = paymentsFiltered.find(payment => 
+        payment.Customer === attendance.Customer && 
+        payment.Date === attendance.Date &&
+        payment.Amount && 
+        parseFloat(payment.Amount) !== 0 &&
+        // Exclude tax/fee payments from revenue calculations
+        !(payment.Memo && payment.Memo.toLowerCase().includes('fee'))
+      );
+      return !!matchingPayment;
+    });
+
+    // Use verified attendance for session classification
+    const groupSessions = verifiedAttendance.filter(r => classifySession(r['ClassType']) === 'group');
+    const privateSessions = verifiedAttendance.filter(r => classifySession(r['ClassType']) === 'private');
 
     // Filtered payments
     const paymentsFiltered = payments.filter(p => {
@@ -207,11 +222,18 @@ router.post('/calculate', async (req, res) => {
       });
     });
 
-    // Exclude full discounts from revenue totals and splits
-    const paymentsEffective = parsedPayments.filter(p => p.discountType !== 'full');
+    // Exclude full discounts and fees from revenue totals and splits (as per customer requirements)
+    const paymentsEffective = parsedPayments.filter(p => {
+      if (p.discountType === 'full') return false;
+      // Exclude fee/tax payments from revenue calculations
+      const memo = (p.memo || '').toLowerCase();
+      if (memo.includes('fee')) return false;
+      return true;
+    });
     const totalPayments = paymentsEffective.reduce((sum, p) => sum + (p.amount || 0), 0);
     const counts = {
-      attendanceTotal: attendanceFiltered.length,
+      attendanceTotal: verifiedAttendance.length, // Only verified attendance counts
+      attendanceTotalRaw: attendanceFiltered.length, // Raw attendance for reference
       groupSessions: groupSessions.length,
       privateSessions: privateSessions.length,
       paymentsCount: parsedPayments.length,
