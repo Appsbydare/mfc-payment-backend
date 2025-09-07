@@ -65,6 +65,7 @@ const dataRoutes = require('./data');
 const paymentsRoutes = require('./payments');
 const rulesRoutes = require('./rules');
 const reportsRoutes = require('./reports');
+const verificationRoutes = require('./verification');
 
 // API routes
 app.use('/auth', authRoutes);
@@ -72,6 +73,7 @@ app.use('/data', dataRoutes);
 app.use('/payments', paymentsRoutes);
 app.use('/reports', reportsRoutes);
 app.use('/rules', rulesRoutes);
+app.use('/verification', verificationRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
