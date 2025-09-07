@@ -402,4 +402,28 @@ router.get('/export', async (req, res) => {
   }
 });
 
+// @desc    Get attendance data
+// @route   GET /data/attendance
+// @access  Private
+router.get('/attendance', async (req, res) => {
+  try {
+    const data = await getExistingData('attendance');
+    
+    res.json({
+      success: true,
+      data,
+      count: data.length,
+      message: 'Attendance data retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching attendance data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch attendance data from Google Sheets',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router; 
