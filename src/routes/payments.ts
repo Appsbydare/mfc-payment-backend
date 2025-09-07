@@ -4,11 +4,178 @@ import { GoogleSheetsService } from '../services/googleSheets';
 
 const router = Router();
 
+// Helper functions
+const toDateOnly = (value: any): Date | null => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+};
+
+const inRange = (date: Date, from: Date | null, to: Date | null): boolean => {
+  if (!date) return false;
+  if (from && date < from) return false;
+  if (to && date > to) return false;
+  return true;
+};
+
+const monthYearMatch = (date: Date, month: number | null, year: number | null): boolean => {
+  if (!date) return false;
+  if (month && date.getUTCMonth() + 1 !== month) return false;
+  if (year && date.getUTCFullYear() !== year) return false;
+  return true;
+};
+
+const classifySession = (classType: string): 'group' | 'private' => {
+  const type = (classType || '').toLowerCase();
+  return type.includes('private') ? 'private' : 'group';
+};
+
+const getDiscountType = (memo: string, amount: number): string | null => {
+  const text = (memo || '').toLowerCase();
+  if (text.includes('full discount') || text.includes('free')) return 'full';
+  if (text.includes('discount') || text.includes('partial')) return 'partial';
+  return null;
+};
+
 // @desc    Calculate payments
 // @route   POST /api/payments/calculate
 // @access  Private
-router.post('/calculate', (req, res) => {
-  res.json({ message: 'Calculate payments - TODO' });
+router.post('/calculate', async (req, res) => {
+  try {
+    const googleSheetsService = new GoogleSheetsService();
+    const { month, year, fromDate, toDate } = req.body || {};
+    const from = toDateOnly(fromDate);
+    const to = toDateOnly(toDate);
+
+    // Load sheets
+    const [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = await Promise.all([
+      googleSheetsService.readSheet('attendance').catch(() => []),
+      googleSheetsService.readSheet('Payments').catch(() => []),
+      googleSheetsService.readSheet('rules').catch(() => []),
+      googleSheetsService.readSheet('settings').catch(() => []),
+      googleSheetsService.readSheet('discounts').catch(() => []),
+    ]);
+
+    // Filtered attendance
+    const attendanceFiltered = attendance.filter((r: any) => {
+      const d = toDateOnly(r['Date']);
+      if (!d) return false;
+      if (from || to) return inRange(d, from, to);
+      if (!month && !year) return true;
+      return monthYearMatch(d, month, year);
+    });
+
+    const groupSessions = attendanceFiltered.filter((r: any) => classifySession(r['ClassType']) === 'group');
+    const privateSessions = attendanceFiltered.filter((r: any) => classifySession(r['ClassType']) === 'private');
+
+    // Filtered payments
+    const paymentsFiltered = payments.filter((p: any) => {
+      const d = toDateOnly(p['Date']);
+      if (!d) return false;
+      if (from || to) return inRange(d, from, to);
+      if (!month && !year) return true;
+      return monthYearMatch(d, month, year);
+    });
+
+    // Parse payments with discount detection
+    const parsedPayments = paymentsFiltered.map((p: any) => {
+      const amount = parseFloat(p['Amount'] || '0') || 0;
+      const discountType = getDiscountType(p['Memo'] || '', amount);
+      return {
+        date: toDateOnly(p['Date']),
+        customer: p['Customer'] || '',
+        memo: p['Memo'] || '',
+        amount,
+        invoice: p['Invoice'] || '',
+        isDiscount: !!discountType,
+        discountType,
+      };
+    });
+
+    // Exclude full discounts from revenue totals
+    const paymentsEffective = parsedPayments.filter((p: any) => p.discountType !== 'full');
+    const totalPayments = paymentsEffective.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+
+    const counts = {
+      attendanceTotal: attendanceFiltered.length,
+      groupSessions: groupSessions.length,
+      privateSessions: privateSessions.length,
+      paymentsCount: parsedPayments.length,
+      discountPayments: parsedPayments.filter((p: any) => p.isDiscount).length,
+    };
+
+    const revenue = {
+      totalPayments,
+      groupRevenue: totalPayments * 0.6, // 60% to group
+      privateRevenue: totalPayments * 0.4, // 40% to private
+    };
+
+    const splits = {
+      group: {
+        revenue: revenue.groupRevenue,
+        coach: revenue.groupRevenue * 0.435, // 43.5%
+        bgm: revenue.groupRevenue * 0.30,    // 30%
+        management: revenue.groupRevenue * 0.085, // 8.5%
+        mfc: revenue.groupRevenue * 0.18,    // 18%
+        percentage: {
+          coach: 43.5,
+          bgm: 30,
+          management: 8.5,
+          mfc: 18
+        }
+      },
+      private: {
+        revenue: revenue.privateRevenue,
+        coach: revenue.privateRevenue * 0.80, // 80%
+        landlord: revenue.privateRevenue * 0.15, // 15%
+        management: revenue.privateRevenue * 0.00, // 0%
+        mfc: revenue.privateRevenue * 0.05,   // 5%
+        percentage: {
+          coach: 80,
+          landlord: 15,
+          management: 0,
+          mfc: 5
+        }
+      }
+    };
+
+    const discounts = {
+      fullCount: parsedPayments.filter((p: any) => p.discountType === 'full').length,
+      partialCount: parsedPayments.filter((p: any) => p.discountType === 'partial').length,
+    };
+
+    res.json({
+      success: true,
+      filters: { month, year, fromDate, toDate },
+      counts,
+      revenue,
+      splits,
+      discounts,
+      notes: 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
+      coachBreakdown: [] // TODO: Implement coach breakdown
+    });
+
+  } catch (error) {
+    console.error('Error calculating payments:', error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to calculate payments',
+      filters: { month: null, year: null, fromDate: null, toDate: null },
+      counts: {
+        attendanceTotal: 0,
+        groupSessions: 0,
+        privateSessions: 0,
+        paymentsCount: 0,
+        discountPayments: 0,
+      },
+      revenue: { totalPayments: 0, groupRevenue: 0, privateRevenue: 0 },
+      splits: { group: {}, private: {} },
+      discounts: { fullCount: 0, partialCount: 0 },
+      notes: 'Calculation failed',
+      coachBreakdown: []
+    });
+  }
 });
 
 // @desc    Get all payment rules

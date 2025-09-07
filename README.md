@@ -13,7 +13,7 @@ This is the backend API for the Malta Fight Co. Payment Automation System.
 - **File upload** with Multer
 - **Data validation** with Joi and Express Validator
 
-## Getting Started
+## Getting Started.
 
 ### Prerequisites
 
