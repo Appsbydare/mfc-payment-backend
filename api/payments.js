@@ -690,9 +690,182 @@ router.post('/generate-report', (req, res) => {
   res.json({ message: 'Generate payment report route - TODO' });
 });
 
-// @desc    Get payment rules (placeholder)
-router.get('/rules', (req, res) => {
-  res.json({ message: 'Get payment rules route - TODO' });
+// @desc    Get payment rules
+router.get('/rules', async (req, res) => {
+  try {
+    const rules = await readSheet('rules');
+    return res.json({ 
+      success: true, 
+      data: rules,
+      message: 'Payment rules retrieved successfully'
+    });
+  } catch (e) {
+    console.error('Payment rules error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to load payment rules' 
+    });
+  }
+});
+
+// @desc    Get global payment rules
+router.get('/rules/global', async (req, res) => {
+  try {
+    const rules = await readSheet('rules');
+    const globalRules = rules.filter(r => !String(r.package_name || '').trim());
+    return res.json({ 
+      success: true, 
+      data: globalRules,
+      message: 'Global payment rules retrieved successfully'
+    });
+  } catch (e) {
+    console.error('Global payment rules error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to load global payment rules' 
+    });
+  }
+});
+
+// @desc    Create payment rule
+router.post('/rules', async (req, res) => {
+  try {
+    const input = req.body || {};
+    const rules = await readSheet('rules');
+    const nextId = rules.reduce((m, r) => Math.max(m, parseInt(r.id || r.ID || '0') || 0), 0) + 1;
+    input.id = String(nextId);
+    input.created_at = new Date().toISOString();
+    input.updated_at = new Date().toISOString();
+    
+    const newRules = [...rules, input];
+    await writeSheet('rules', newRules);
+    
+    return res.json({ 
+      success: true, 
+      data: input,
+      message: 'Payment rule created successfully'
+    });
+  } catch (e) {
+    console.error('Create payment rule error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to create payment rule' 
+    });
+  }
+});
+
+// @desc    Update payment rule
+router.put('/rules/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const input = req.body || {};
+    const rules = await readSheet('rules');
+    
+    const ruleIndex = rules.findIndex(r => String(r.id || r.ID) === String(id));
+    if (ruleIndex === -1) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Rule not found' 
+      });
+    }
+    
+    input.id = id;
+    input.updated_at = new Date().toISOString();
+    rules[ruleIndex] = { ...rules[ruleIndex], ...input };
+    
+    await writeSheet('rules', rules);
+    
+    return res.json({ 
+      success: true, 
+      data: rules[ruleIndex],
+      message: 'Payment rule updated successfully'
+    });
+  } catch (e) {
+    console.error('Update payment rule error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update payment rule' 
+    });
+  }
+});
+
+// @desc    Delete payment rule
+router.delete('/rules/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const rules = await readSheet('rules');
+    
+    const filteredRules = rules.filter(r => String(r.id || r.ID) !== String(id));
+    if (filteredRules.length === rules.length) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Rule not found' 
+      });
+    }
+    
+    await writeSheet('rules', filteredRules);
+    
+    return res.json({ 
+      success: true, 
+      message: 'Payment rule deleted successfully'
+    });
+  } catch (e) {
+    console.error('Delete payment rule error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete payment rule' 
+    });
+  }
+});
+
+// @desc    Get payment settings
+router.get('/settings', async (req, res) => {
+  try {
+    const settings = await readSheet('settings');
+    return res.json({ 
+      success: true, 
+      data: settings,
+      message: 'Payment settings retrieved successfully'
+    });
+  } catch (e) {
+    console.error('Payment settings error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to load payment settings' 
+    });
+  }
+});
+
+// @desc    Update payment settings
+router.put('/settings', async (req, res) => {
+  try {
+    const input = Array.isArray(req.body) ? req.body : [req.body];
+    const settings = await readSheet('settings');
+    const map = new Map(settings.map(r => [String(r.key).toLowerCase(), r]));
+    
+    input.forEach(item => {
+      const key = String(item.key).toLowerCase();
+      map.set(key, { 
+        key: item.key, 
+        value: String(item.value ?? ''), 
+        description: item.description || '' 
+      });
+    });
+    
+    const newSettings = Array.from(map.values());
+    await writeSheet('settings', newSettings);
+    
+    return res.json({ 
+      success: true, 
+      message: 'Payment settings updated successfully'
+    });
+  } catch (e) {
+    console.error('Update payment settings error:', e);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update payment settings' 
+    });
+  }
 });
 
 module.exports = router;
