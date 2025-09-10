@@ -300,6 +300,56 @@ export class GoogleSheetsService {
             updated_at: new Date().toISOString()
           }
         ],
+        discounts: [
+          {
+            id: 1,
+            discount_code: 'LOYALTY: 1 TO 1 - SINGLE CLASS DISCOUNT',
+            name: 'Loyalty 1-to-1 Single Class Discount',
+            applicable_percentage: 12.5,
+            coach_payment_type: 'partial',
+            match_type: 'exact',
+            active: true,
+            notes: '12.5% discount on single private sessions for loyalty members',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 2,
+            discount_code: 'MindBody Switch',
+            name: 'MindBody Switch',
+            applicable_percentage: 0,
+            coach_payment_type: 'full',
+            match_type: 'exact',
+            active: true,
+            notes: 'Treat as regular full price paying customer',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 3,
+            discount_code: 'Freedom Pass',
+            name: 'Freedom Pass',
+            applicable_percentage: 0,
+            coach_payment_type: 'full',
+            match_type: 'exact',
+            active: true,
+            notes: 'Treat as regular full price paying customer',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 4,
+            discount_code: 'discount',
+            name: 'Generic Discount',
+            applicable_percentage: 0,
+            coach_payment_type: 'free',
+            match_type: 'contains',
+            active: true,
+            notes: 'Free classes - everyone gets paid zero',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ],
         coaches: [],
         reports: [],
         settings: [

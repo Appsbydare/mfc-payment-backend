@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { GoogleSheetsService } from '../services/googleSheets';
+import { paymentVerificationService } from '../services/paymentVerificationService';
 
 const router = Router();
 const googleSheetsService = new GoogleSheetsService();
@@ -353,6 +354,33 @@ router.get('/invoice-status/:invoice', async (req, res) => {
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to get invoice status'
+    });
+  }
+});
+
+// @desc    Enhanced verification with discount integration
+// @route   POST /api/verification/enhanced
+// @access  Private
+router.post('/enhanced', async (req, res) => {
+  try {
+    const { month, year, fromDate, toDate } = req.body;
+    
+    const result = await paymentVerificationService.verifyPayments({
+      month,
+      year,
+      fromDate,
+      toDate
+    });
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error in enhanced verification:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to perform enhanced verification'
     });
   }
 });
