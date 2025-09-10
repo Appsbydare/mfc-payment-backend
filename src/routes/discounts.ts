@@ -8,7 +8,33 @@ const router = Router();
 // @access  Private
 router.get('/', async (req, res) => {
   try {
-    const discounts = await discountService.getActiveDiscounts();
+    // First try to get discounts directly from Google Sheets
+    const { GoogleSheetsService } = await import('../services/googleSheets');
+    const sheetsService = new GoogleSheetsService();
+    
+    let discounts = [];
+    try {
+      const rawData = await sheetsService.readSheet('discounts');
+      console.log('Raw discount data from sheets:', rawData);
+      
+      // Transform the data based on the actual Google Sheets structure
+      discounts = rawData.map((row: any, index: number) => ({
+        id: row.id || (index + 1),
+        discount_code: row.discount_code || row['discount_code'] || '',
+        name: row.name || row['name'] || '',
+        applicable_percentage: parseFloat(row.applicable_percentage || row['applicable_percentage'] || '0'),
+        coach_payment_type: (row.coach_payment_type || row['coach_payment_type'] || 'partial').toLowerCase(),
+        match_type: (row.match_type || row['match_type'] || 'exact').toLowerCase(),
+        active: row.active === true || row.active === 'TRUE' || row.active === '1' || row.active === 1,
+        notes: row.notes || row['notes'] || '',
+        created_at: row.created_at || row['created_at'] || new Date().toISOString(),
+        updated_at: row.updated_at || row['updated_at'] || new Date().toISOString()
+      })).filter(discount => discount.discount_code && discount.name); // Filter out empty rows
+    } catch (sheetsError) {
+      console.error('Error reading from sheets, falling back to service:', sheetsError);
+      discounts = await discountService.getActiveDiscounts();
+    }
+
     res.json({
       success: true,
       data: discounts
@@ -219,6 +245,117 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete discount'
+    });
+  }
+});
+
+// @desc    Initialize discounts sheet if it doesn't exist
+// @route   POST /api/discounts/initialize
+// @access  Private
+router.post('/initialize', async (req, res) => {
+  try {
+    const { GoogleSheetsService } = await import('../services/googleSheets');
+    const sheetsService = new GoogleSheetsService();
+    
+    // Try to read the discounts sheet first
+    let existingData = [];
+    try {
+      existingData = await sheetsService.readSheet('discounts');
+    } catch (error) {
+      console.log('Discounts sheet does not exist, will create it');
+    }
+    
+    // If no data exists, initialize with default data
+    if (existingData.length === 0) {
+      const defaultDiscounts = [
+        {
+          id: 1,
+          discount_code: '30% OFF YOUR FIRST MONTH DISCOUNT',
+          name: '30% First Month Discount Alt',
+          applicable_percentage: 30,
+          coach_payment_type: 'partial',
+          match_type: 'exact',
+          active: true,
+          notes: 'Alternative wording for 30% first month discount',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        {
+          id: 2,
+          discount_code: 'BGM MULTIPACK DISCOUNT',
+          name: 'BGM Multipack Discount',
+          applicable_percentage: 15,
+          coach_payment_type: 'partial',
+          match_type: 'exact',
+          active: true,
+          notes: 'Bulk discount for BGM multipacks',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        },
+        // Add more default discounts based on the Google Sheets image
+        {
+          id: 3,
+          discount_code: 'BOXING DISCOUNT',
+          name: 'Boxing Discount',
+          applicable_percentage: 100,
+          coach_payment_type: 'free',
+          match_type: 'exact',
+          active: true,
+          notes: 'Free boxing classes - everyone gets paid zero',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      ];
+      
+      await sheetsService.writeSheet('discounts', defaultDiscounts);
+      
+      res.json({
+        success: true,
+        message: 'Discounts sheet initialized with default data',
+        data: defaultDiscounts
+      });
+    } else {
+      res.json({
+        success: true,
+        message: 'Discounts sheet already exists',
+        data: existingData
+      });
+    }
+  } catch (error) {
+    console.error('Error initializing discounts:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initialize discounts sheet'
+    });
+  }
+});
+
+// @desc    Debug Google Sheets connection
+// @route   GET /api/discounts/debug
+// @access  Private
+router.get('/debug', async (req, res) => {
+  try {
+    const { GoogleSheetsService } = await import('../services/googleSheets');
+    const sheetsService = new GoogleSheetsService();
+    
+    // Test reading the discounts sheet
+    const rawData = await sheetsService.readSheet('discounts');
+    
+    res.json({
+      success: true,
+      debug: {
+        rawDataCount: rawData.length,
+        rawDataSample: rawData.slice(0, 3),
+        rawDataKeys: rawData.length > 0 ? Object.keys(rawData[0]) : [],
+        fullData: rawData
+      }
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
     });
   }
 });
