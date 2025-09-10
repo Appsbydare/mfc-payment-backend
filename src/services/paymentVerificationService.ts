@@ -30,7 +30,7 @@ export interface PaymentVerificationRow {
   Invoice: string;
   Category: string;
   IsVerified: boolean;
-  DiscountData?: InvoiceDiscountData;
+  DiscountData?: InvoiceDiscountData | undefined;
 }
 
 export interface VerificationSummary {
@@ -127,7 +127,7 @@ export class PaymentVerificationService {
       if (fromDate && toDate) {
         const from = this.parseDate(fromDate);
         const to = this.parseDate(toDate);
-        return date >= from && date <= to;
+        return from && to && date >= from && date <= to;
       }
 
       if (month && year) {
