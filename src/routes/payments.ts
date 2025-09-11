@@ -121,35 +121,45 @@ router.post('/calculate', async (req, res) => {
 
     if (isGoogleSheetsConfigured) {
       try {
+        console.log('🔗 Google Sheets is configured, attempting to connect...');
         const googleSheetsService = new GoogleSheetsService();
+        
+        console.log('📊 Loading sheets: attendance, Payments, rules, settings, discounts...');
         // Load sheets
         const results = await Promise.all([
-          googleSheetsService.readSheet('attendance').catch(() => []),
-          googleSheetsService.readSheet('Payments').catch(() => []),
-          googleSheetsService.readSheet('rules').catch(() => []),
-          googleSheetsService.readSheet('settings').catch(() => []),
-          googleSheetsService.readSheet('discounts').catch(() => []),
+          googleSheetsService.readSheet('attendance').catch((e) => { console.error('❌ Failed to read attendance sheet:', e.message); return []; }),
+          googleSheetsService.readSheet('Payments').catch((e) => { console.error('❌ Failed to read Payments sheet:', e.message); return []; }),
+          googleSheetsService.readSheet('rules').catch((e) => { console.error('❌ Failed to read rules sheet:', e.message); return []; }),
+          googleSheetsService.readSheet('settings').catch((e) => { console.error('❌ Failed to read settings sheet:', e.message); return []; }),
+          googleSheetsService.readSheet('discounts').catch((e) => { console.error('❌ Failed to read discounts sheet:', e.message); return []; }),
         ]);
         [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = results;
         
-            if (attendance.length === 0 && payments.length === 0) {
+        console.log(`📈 Loaded sheets: attendance(${attendance.length}), payments(${payments.length}), rules(${rulesSheet.length}), settings(${settingsSheet.length}), discounts(${discountsSheet.length})`);
+        
+        if (attendance.length === 0 && payments.length === 0) {
+          console.log('⚠️ No data found in Google Sheets, using sample data');
           notes = 'Google Sheets connected but no data found. Using sample data for demonstration.';
           // Add sample data for demonstration
           attendance = generateSampleAttendance();
           payments = generateSamplePayments();
+          console.log(`🎭 Generated sample data: attendance(${attendance.length}), payments(${payments.length})`);
         }
       } catch (error) {
-        console.error('Error loading Google Sheets data:', error);
+        console.error('❌ Error loading Google Sheets data:', error);
         notes = 'Google Sheets configuration error. Using sample data for demonstration.';
         // Add sample data for demonstration
         attendance = generateSampleAttendance();
         payments = generateSamplePayments();
+        console.log(`🎭 Using sample data due to error: attendance(${attendance.length}), payments(${payments.length})`);
       }
     } else {
+      console.log('⚙️ Google Sheets not configured, using sample data');
       notes = 'Google Sheets not configured. Using sample data for demonstration.';
       // Add sample data for demonstration
       attendance = generateSampleAttendance();
       payments = generateSamplePayments();
+      console.log(`🎭 Sample data generated: attendance(${attendance.length}), payments(${payments.length})`);
     }
 
     // Debug logging for date filtering
@@ -259,11 +269,34 @@ router.post('/calculate', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error calculating payments:', error);
+    console.error('❌ Error calculating payments:', error);
+    
+    // Determine the specific error details
+    let errorMessage = 'Failed to calculate payments';
+    let errorType = 'unknown';
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      if (error.message.includes('Google Sheets')) {
+        errorType = 'google_sheets';
+      } else if (error.message.includes('read') || error.message.includes('fetch')) {
+        errorType = 'data_access';
+      } else if (error.message.includes('parse') || error.message.includes('invalid')) {
+        errorType = 'data_parsing';
+      }
+    }
+    
+    console.error(`🔍 Error type: ${errorType}, Message: ${errorMessage}`);
+    
     res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : 'Failed to calculate payments',
-      filters: { month: null, year: null, fromDate: null, toDate: null },
+      message: `Calculation Error (${errorType}): ${errorMessage}`,
+      errorType,
+      errorDetails: {
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+      },
+      filters: { month, year, fromDate, toDate },
       counts: {
         attendanceTotal: 0,
         groupSessions: 0,
@@ -274,7 +307,7 @@ router.post('/calculate', async (req, res) => {
       revenue: { totalPayments: 0, groupRevenue: 0, privateRevenue: 0 },
       splits: { group: {}, private: {} },
       discounts: { fullCount: 0, partialCount: 0 },
-      notes: 'Calculation failed',
+      notes: `Calculation failed due to ${errorType} error: ${errorMessage}`,
       coachBreakdown: []
     });
   }
@@ -646,12 +679,39 @@ router.post('/verify', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error verifying payments:', error);
+    console.error('❌ Error verifying payments:', error);
+    
+    // Determine the specific error details
+    let errorMessage = 'Failed to verify payments';
+    let errorType = 'unknown';
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      if (error.message.includes('Google Sheets')) {
+        errorType = 'google_sheets';
+      } else if (error.message.includes('read') || error.message.includes('fetch')) {
+        errorType = 'data_access';
+      } else if (error.message.includes('parse') || error.message.includes('invalid')) {
+        errorType = 'data_parsing';
+      }
+    }
+    
+    console.error(`🔍 Verification error type: ${errorType}, Message: ${errorMessage}`);
+    
     res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : 'Failed to verify payments',
+      message: `Verification Error (${errorType}): ${errorMessage}`,
+      errorType,
+      errorDetails: {
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+      },
       rows: [],
-      summary: {}
+      summary: {
+        attendanceCount: 0,
+        verifiedCount: 0,
+        unverifiedCount: 0
+      }
     });
   }
 });
