@@ -59,6 +59,7 @@ router.post('/calculate', async (req, res) => {
     let rulesSheet: any[] = [];
     let settingsSheet: any[] = [];
     let discountsSheet: any[] = [];
+    let notes = '';
 
     if (isGoogleSheetsConfigured) {
       try {
@@ -72,10 +73,17 @@ router.post('/calculate', async (req, res) => {
           googleSheetsService.readSheet('discounts').catch(() => []),
         ]);
         [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = results;
+        
+        if (attendance.length === 0 && payments.length === 0) {
+          notes = 'Google Sheets connected but no data found. Please import attendance and payment data.';
+        }
       } catch (error) {
         console.error('Error loading Google Sheets data:', error);
+        notes = 'Google Sheets configuration error. Using sample data for demonstration.';
         // Continue with empty arrays
       }
+    } else {
+      notes = 'Google Sheets not configured. Set GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_CLIENT_EMAIL, and GOOGLE_SHEETS_PRIVATE_KEY in .env file.';
     }
 
     // Filtered attendance
@@ -173,7 +181,7 @@ router.post('/calculate', async (req, res) => {
       revenue,
       splits,
       discounts,
-      notes: 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
+      notes: notes || 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
       coachBreakdown: [] // TODO: Implement coach breakdown
     });
 
@@ -501,6 +509,7 @@ router.post('/verify', async (req, res) => {
 
     let attendanceData: any[] = [];
     let paymentData: any[] = [];
+    let message = 'Verification completed successfully';
 
     if (isGoogleSheetsConfigured) {
       try {
@@ -511,10 +520,17 @@ router.post('/verify', async (req, res) => {
           googleSheetsService.readSheet('Payments').catch(() => [])
         ]);
         [attendanceData, paymentData] = results;
+        
+        if (attendanceData.length === 0 && paymentData.length === 0) {
+          message = 'Google Sheets connected but no data found. Please import attendance and payment data.';
+        }
       } catch (error) {
         console.error('Error loading Google Sheets data for verification:', error);
+        message = 'Google Sheets configuration error. Verification completed with empty data.';
         // Continue with empty arrays
       }
+    } else {
+      message = 'Google Sheets not configured. Please set up Google Sheets credentials in .env file.';
     }
 
     // Simple verification logic - mark as verified if there's a matching payment
@@ -553,7 +569,7 @@ router.post('/verify', async (req, res) => {
       success: true,
       rows: verificationRows,
       summary,
-      message: 'Verification completed successfully'
+      message
     });
 
   } catch (error) {
