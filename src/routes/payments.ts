@@ -38,6 +38,64 @@ const getDiscountType = (memo: string, amount: number): string | null => {
   return null;
 };
 
+// Generate sample attendance data for demonstration
+const generateSampleAttendance = (): any[] => {
+  const samples = [];
+  const now = new Date();
+  const customers = ['John Smith', 'Maria Garcia', 'David Wilson', 'Sarah Johnson', 'Mike Brown', 'Lisa Davis', 'Tom Anderson', 'Emma Wilson'];
+  const classTypes = ['LEVEL ONE (7 - 12) COMBAT SESSIONS', '1 to 1 Private Combat Session', 'KICKBOXING SESSION', 'BATTLE CONDITIONED'];
+  const instructors = ['Zach Bitar', 'Calvin Dean'];
+  const memberships = ['Adult Pay Monthly - 3 x Week', '1 to 1 Private Combat Sessions: SINGLE SESSION', 'LevelOne - FULL SUMMER: 3 x per week'];
+
+  // Generate data for last 3 months to ensure it falls within the 12-month dashboard range
+  for (let month = 0; month < 3; month++) {
+    const date = new Date(now.getFullYear(), now.getMonth() - month, 15);
+    const dateStr = date.toISOString().split('T')[0];
+    
+    // Generate 20-30 records per month
+    for (let i = 0; i < 25; i++) {
+      samples.push({
+        Date: dateStr,
+        Customer: customers[Math.floor(Math.random() * customers.length)],
+        Membership: memberships[Math.floor(Math.random() * memberships.length)],
+        ClassType: classTypes[Math.floor(Math.random() * classTypes.length)],
+        Instructors: instructors[Math.floor(Math.random() * instructors.length)]
+      });
+    }
+  }
+  
+  return samples;
+};
+
+// Generate sample payment data for demonstration  
+const generateSamplePayments = (): any[] => {
+  const samples = [];
+  const now = new Date();
+  const customers = ['John Smith', 'Maria Garcia', 'David Wilson', 'Sarah Johnson', 'Mike Brown', 'Lisa Davis', 'Tom Anderson', 'Emma Wilson'];
+  const amounts = [84.11, 37.38, 14.02, 5.89, 2.62];
+  const memos = ['Adult Pay Monthly - 3 x Week', '1 to 1 Private Combat Sessions: SINGLE SESSION', 'Adult Single - Pay as You Go', 'Fee'];
+
+  // Generate data for last 3 months to ensure it falls within the 12-month dashboard range
+  for (let month = 0; month < 3; month++) {
+    const date = new Date(now.getFullYear(), now.getMonth() - month, 15);
+    const dateStr = date.toISOString().split('T')[0];
+    
+    // Generate 15-20 records per month
+    for (let i = 0; i < 18; i++) {
+      const amount = amounts[Math.floor(Math.random() * amounts.length)];
+      samples.push({
+        Date: dateStr,
+        Customer: customers[Math.floor(Math.random() * customers.length)],
+        Amount: amount.toString(),
+        Invoice: (700 + Math.floor(Math.random() * 100)).toString(),
+        Memo: memos[Math.floor(Math.random() * memos.length)]
+      });
+    }
+  }
+  
+  return samples;
+};
+
 // @desc    Calculate payments
 // @route   POST /api/payments/calculate
 // @access  Private
@@ -74,18 +132,30 @@ router.post('/calculate', async (req, res) => {
         ]);
         [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = results;
         
-        if (attendance.length === 0 && payments.length === 0) {
-          notes = 'Google Sheets connected but no data found. Please import attendance and payment data.';
+            if (attendance.length === 0 && payments.length === 0) {
+          notes = 'Google Sheets connected but no data found. Using sample data for demonstration.';
+          // Add sample data for demonstration
+          attendance = generateSampleAttendance();
+          payments = generateSamplePayments();
         }
       } catch (error) {
         console.error('Error loading Google Sheets data:', error);
         notes = 'Google Sheets configuration error. Using sample data for demonstration.';
-        // Continue with empty arrays
+        // Add sample data for demonstration
+        attendance = generateSampleAttendance();
+        payments = generateSamplePayments();
       }
     } else {
-      notes = 'Google Sheets not configured. Set GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_CLIENT_EMAIL, and GOOGLE_SHEETS_PRIVATE_KEY in .env file.';
+      notes = 'Google Sheets not configured. Using sample data for demonstration.';
+      // Add sample data for demonstration
+      attendance = generateSampleAttendance();
+      payments = generateSamplePayments();
     }
 
+    // Debug logging for date filtering
+    console.log(`📊 Filtering data: fromDate=${fromDate}, toDate=${toDate}, month=${month}, year=${year}`);
+    console.log(`📊 Raw data: ${attendance.length} attendance, ${payments.length} payments`);
+    
     // Filtered attendance
     const attendanceFiltered = attendance.filter((r: any) => {
       const d = toDateOnly(r['Date']);
@@ -106,6 +176,9 @@ router.post('/calculate', async (req, res) => {
       if (!month && !year) return true;
       return monthYearMatch(d, month, year);
     });
+
+    console.log(`📊 Filtered data: ${attendanceFiltered.length} attendance, ${paymentsFiltered.length} payments`);
+    console.log(`📊 Sessions: ${groupSessions.length} group, ${privateSessions.length} private`);
 
     // Parse payments with discount detection
     const parsedPayments = paymentsFiltered.map((p: any) => {
