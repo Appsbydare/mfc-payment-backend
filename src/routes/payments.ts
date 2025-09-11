@@ -40,7 +40,7 @@ const getDiscountType = (memo: string, amount: number): string | null => {
 
 // Generate sample attendance data for demonstration
 const generateSampleAttendance = (): any[] => {
-  const samples = [];
+  const samples: any[] = [];
   const now = new Date();
   const customers = ['John Smith', 'Maria Garcia', 'David Wilson', 'Sarah Johnson', 'Mike Brown', 'Lisa Davis', 'Tom Anderson', 'Emma Wilson'];
   const classTypes = ['LEVEL ONE (7 - 12) COMBAT SESSIONS', '1 to 1 Private Combat Session', 'KICKBOXING SESSION', 'BATTLE CONDITIONED'];
@@ -69,7 +69,7 @@ const generateSampleAttendance = (): any[] => {
 
 // Generate sample payment data for demonstration  
 const generateSamplePayments = (): any[] => {
-  const samples = [];
+  const samples: any[] = [];
   const now = new Date();
   const customers = ['John Smith', 'Maria Garcia', 'David Wilson', 'Sarah Johnson', 'Mike Brown', 'Lisa Davis', 'Tom Anderson', 'Emma Wilson'];
   const amounts = [84.11, 37.38, 14.02, 5.89, 2.62];
