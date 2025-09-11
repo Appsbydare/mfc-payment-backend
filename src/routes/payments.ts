@@ -43,19 +43,40 @@ const getDiscountType = (memo: string, amount: number): string | null => {
 // @access  Private
 router.post('/calculate', async (req, res) => {
   try {
-    const googleSheetsService = new GoogleSheetsService();
     const { month, year, fromDate, toDate } = req.body || {};
     const from = toDateOnly(fromDate);
     const to = toDateOnly(toDate);
 
-    // Load sheets
-    const [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = await Promise.all([
-      googleSheetsService.readSheet('attendance').catch(() => []),
-      googleSheetsService.readSheet('Payments').catch(() => []),
-      googleSheetsService.readSheet('rules').catch(() => []),
-      googleSheetsService.readSheet('settings').catch(() => []),
-      googleSheetsService.readSheet('discounts').catch(() => []),
-    ]);
+    // Check if Google Sheets is configured
+    const isGoogleSheetsConfigured = !!(
+      process.env.GOOGLE_SHEETS_SPREADSHEET_ID && 
+      process.env.GOOGLE_SHEETS_CLIENT_EMAIL && 
+      process.env.GOOGLE_SHEETS_PRIVATE_KEY
+    );
+
+    let attendance: any[] = [];
+    let payments: any[] = [];
+    let rulesSheet: any[] = [];
+    let settingsSheet: any[] = [];
+    let discountsSheet: any[] = [];
+
+    if (isGoogleSheetsConfigured) {
+      try {
+        const googleSheetsService = new GoogleSheetsService();
+        // Load sheets
+        const results = await Promise.all([
+          googleSheetsService.readSheet('attendance').catch(() => []),
+          googleSheetsService.readSheet('Payments').catch(() => []),
+          googleSheetsService.readSheet('rules').catch(() => []),
+          googleSheetsService.readSheet('settings').catch(() => []),
+          googleSheetsService.readSheet('discounts').catch(() => []),
+        ]);
+        [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = results;
+      } catch (error) {
+        console.error('Error loading Google Sheets data:', error);
+        // Continue with empty arrays
+      }
+    }
 
     // Filtered attendance
     const attendanceFiltered = attendance.filter((r: any) => {
@@ -469,14 +490,32 @@ router.get('/bgm', (req, res) => {
 // @access  Private
 router.post('/verify', async (req, res) => {
   try {
-    const googleSheetsService = new GoogleSheetsService();
     const { month, year, fromDate, toDate } = req.body || {};
     
-    // Get attendance and payment data
-    const [attendanceData, paymentData] = await Promise.all([
-      googleSheetsService.readSheet('attendance').catch(() => []),
-      googleSheetsService.readSheet('Payments').catch(() => [])
-    ]);
+    // Check if Google Sheets is configured
+    const isGoogleSheetsConfigured = !!(
+      process.env.GOOGLE_SHEETS_SPREADSHEET_ID && 
+      process.env.GOOGLE_SHEETS_CLIENT_EMAIL && 
+      process.env.GOOGLE_SHEETS_PRIVATE_KEY
+    );
+
+    let attendanceData: any[] = [];
+    let paymentData: any[] = [];
+
+    if (isGoogleSheetsConfigured) {
+      try {
+        const googleSheetsService = new GoogleSheetsService();
+        // Get attendance and payment data
+        const results = await Promise.all([
+          googleSheetsService.readSheet('attendance').catch(() => []),
+          googleSheetsService.readSheet('Payments').catch(() => [])
+        ]);
+        [attendanceData, paymentData] = results;
+      } catch (error) {
+        console.error('Error loading Google Sheets data for verification:', error);
+        // Continue with empty arrays
+      }
+    }
 
     // Simple verification logic - mark as verified if there's a matching payment
     const verificationRows = attendanceData.map((attendance: any) => {
