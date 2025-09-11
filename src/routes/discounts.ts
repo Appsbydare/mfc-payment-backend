@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
     const { GoogleSheetsService } = await import('../services/googleSheets');
     const sheetsService = new GoogleSheetsService();
     
-    let discounts = [];
+    let discounts: any[] = [];
     try {
       const rawData = await sheetsService.readSheet('discounts');
       console.log('Raw discount data from sheets:', rawData);
@@ -258,7 +258,7 @@ router.post('/initialize', async (req, res) => {
     const sheetsService = new GoogleSheetsService();
     
     // Try to read the discounts sheet first
-    let existingData = [];
+    let existingData: any[] = [];
     try {
       existingData = await sheetsService.readSheet('discounts');
     } catch (error) {
