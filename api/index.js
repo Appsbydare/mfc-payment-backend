@@ -63,6 +63,7 @@ app.get('/health', (req, res) => {
 const authRoutes = require('./auth');
 const dataRoutes = require('./data');
 const paymentsRoutes = require('./payments');
+const discountsRoutes = require('./discounts');
 const rulesRoutes = require('./rules');
 const reportsRoutes = require('./reports');
 const verificationRoutes = require('./verification');
@@ -74,6 +75,7 @@ app.use('/payments', paymentsRoutes);
 app.use('/reports', reportsRoutes);
 app.use('/rules', rulesRoutes);
 app.use('/verification', verificationRoutes);
+app.use('/discounts', discountsRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
