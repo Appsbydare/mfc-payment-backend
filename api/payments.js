@@ -2,6 +2,56 @@ const express = require('express');
 const { google } = require('googleapis');
 const router = express.Router();
 
+// -----------------------------
+// Sample data generators (fallback when Google Sheets isn't configured)
+// -----------------------------
+function generateSampleAttendance() {
+  const samples = [];
+  const now = new Date();
+  const customers = ['John Smith', 'Maria Garcia', 'David Wilson', 'Sarah Johnson', 'Mike Brown', 'Lisa Davis', 'Tom Anderson', 'Emma Wilson'];
+  const classTypes = ['LEVEL ONE (7 - 12) COMBAT SESSIONS', '1 to 1 Private Combat Session', 'KICKBOXING SESSION', 'BATTLE CONDITIONED'];
+  const instructors = ['Zach Bitar', 'Calvin Dean'];
+  const memberships = ['Adult Pay Monthly - 3 x Week', '1 to 1 Private Combat Sessions: SINGLE SESSION', 'LevelOne - FULL SUMMER: 3 x per week'];
+
+  for (let m = 0; m < 3; m++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - m, 15);
+    const ds = d.toISOString().split('T')[0];
+    for (let i = 0; i < 25; i++) {
+      samples.push({
+        Date: ds,
+        Customer: customers[Math.floor(Math.random() * customers.length)],
+        Membership: memberships[Math.floor(Math.random() * memberships.length)],
+        ClassType: classTypes[Math.floor(Math.random() * classTypes.length)],
+        Instructors: instructors[Math.floor(Math.random() * instructors.length)],
+      });
+    }
+  }
+  return samples;
+}
+
+function generateSamplePayments() {
+  const samples = [];
+  const now = new Date();
+  const customers = ['John Smith', 'Maria Garcia', 'David Wilson', 'Sarah Johnson', 'Mike Brown', 'Lisa Davis', 'Tom Anderson', 'Emma Wilson'];
+  const amounts = [84.11, 37.38, 14.02, 5.89, 2.62];
+  const memos = ['Adult Pay Monthly - 3 x Week', '1 to 1 Private Combat Sessions: SINGLE SESSION', 'Adult Single - Pay as You Go', 'Fee'];
+  for (let m = 0; m < 3; m++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - m, 15);
+    const ds = d.toISOString().split('T')[0];
+    for (let i = 0; i < 18; i++) {
+      const amount = amounts[Math.floor(Math.random() * amounts.length)];
+      samples.push({
+        Date: ds,
+        Customer: customers[Math.floor(Math.random() * customers.length)],
+        Amount: amount.toString(),
+        Invoice: (700 + Math.floor(Math.random() * 100)).toString(),
+        Memo: memos[Math.floor(Math.random() * memos.length)],
+      });
+    }
+  }
+  return samples;
+}
+
 // Google Sheets auth
 function getGoogleSheetsAuth() {
   const auth = new google.auth.GoogleAuth({
@@ -124,14 +174,48 @@ router.post('/calculate', async (req, res) => {
     const from = toDateOnly(fromDate);
     const to = toDateOnly(toDate);
 
-    // Load sheets
-    const [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = await Promise.all([
-      readSheet('attendance'),
-      readSheet('payments'),
-      readSheet('rules').catch(() => []),
-      readSheet('settings').catch(() => []),
-      readSheet('discounts').catch(() => []),
-    ]);
+    // Determine Google Sheets availability
+    const isSheetsConfigured = !!(
+      process.env.GOOGLE_SHEETS_SPREADSHEET_ID &&
+      process.env.GOOGLE_SHEETS_CLIENT_EMAIL &&
+      process.env.GOOGLE_SHEETS_PRIVATE_KEY
+    );
+
+    let attendance = [];
+    let payments = [];
+    let rulesSheet = [];
+    let settingsSheet = [];
+    let discountsSheet = [];
+    let notes = '';
+
+    if (isSheetsConfigured) {
+      try {
+        // Load sheets
+        const results = await Promise.all([
+          readSheet('attendance').catch(() => []),
+          readSheet('Payments').catch(() => []),
+          readSheet('rules').catch(() => []),
+          readSheet('settings').catch(() => []),
+          readSheet('discounts').catch(() => []),
+        ]);
+        [attendance, payments, rulesSheet, settingsSheet, discountsSheet] = results;
+
+        if (attendance.length === 0 && payments.length === 0) {
+          notes = 'Google Sheets connected but no data found. Using sample data for demonstration.';
+          attendance = generateSampleAttendance();
+          payments = generateSamplePayments();
+        }
+      } catch (e) {
+        console.error('Failed to load Google Sheets data, using sample data:', e?.message || e);
+        notes = 'Google Sheets configuration error. Using sample data for demonstration.';
+        attendance = generateSampleAttendance();
+        payments = generateSamplePayments();
+      }
+    } else {
+      notes = 'Google Sheets not configured. Using sample data for demonstration.';
+      attendance = generateSampleAttendance();
+      payments = generateSamplePayments();
+    }
 
     // Helpers to read flexible column names from sheets
     const getVal = (row, keys) => {
@@ -147,6 +231,15 @@ router.post('/calculate', async (req, res) => {
     // Filtered attendance
     const attendanceFiltered = attendance.filter(r => {
       const d = toDateOnly(r['Date']);
+      if (!d) return false;
+      if (from || to) return inRange(d, from, to);
+      if (!month && !year) return true;
+      return monthYearMatch(d, month, year);
+    });
+
+    // Filtered payments
+    const paymentsFiltered = payments.filter(p => {
+      const d = toDateOnly(p['Date']);
       if (!d) return false;
       if (from || to) return inRange(d, from, to);
       if (!month && !year) return true;
@@ -170,15 +263,6 @@ router.post('/calculate', async (req, res) => {
     // Use verified attendance for session classification
     const groupSessions = verifiedAttendance.filter(r => classifySession(r['ClassType']) === 'group');
     const privateSessions = verifiedAttendance.filter(r => classifySession(r['ClassType']) === 'private');
-
-    // Filtered payments
-    const paymentsFiltered = payments.filter(p => {
-      const d = toDateOnly(p['Date']);
-      if (!d) return false;
-      if (from || to) return inRange(d, from, to);
-      if (!month && !year) return true;
-      return monthYearMatch(d, month, year);
-    });
 
     // Build discount matchers from sheet if present
     const discountsMatchers = (Array.isArray(discountsSheet) ? discountsSheet : [])
@@ -524,7 +608,7 @@ router.post('/calculate', async (req, res) => {
       discounts,
       coachBreakdown,
       calcId,
-      notes: 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
+      notes: notes || 'Results written to payment_calculator and payment_calc_detail tabs. Session-to-payment mapping pending.',
     });
   } catch (error) {
     console.error('Error calculating payments:', error);
@@ -650,10 +734,22 @@ router.post('/verify', async (req, res) => {
       const customer = (row['Customer'] || '').trim();
       const pays = paymentsFiltered.filter(p => (p['Customer'] || '').trim() === customer);
       if (pays.length === 0) return null;
-      const d = toDateOnly(row['Date']);
+      const classDate = toDateOnly(row['Date']);
+      const getTime = (p) => {
+        const pd = toDateOnly(p['Date']);
+        return pd ? pd.getTime() : 0;
+      };
+      if (!classDate) {
+        return pays.sort((a, b) => getTime(b) - getTime(a))[0] || null;
+      }
       // Prefer latest payment on or before the class date; otherwise closest after
-      const onOrBefore = pays.filter(p => p.__date && d && p.__date <= d).sort((a,b) => b.__date - a.__date);
-      const pick = onOrBefore[0] || pays.sort((a,b) => Math.abs((a.__date||0) - d) - Math.abs((b.__date||0) - d))[0];
+      const onOrBefore = pays
+        .filter(p => {
+          const pd = toDateOnly(p['Date']);
+          return pd && pd.getTime() <= classDate.getTime();
+        })
+        .sort((a, b) => getTime(b) - getTime(a));
+      const pick = onOrBefore[0] || pays.sort((a, b) => Math.abs(getTime(a) - classDate.getTime()) - Math.abs(getTime(b) - classDate.getTime()))[0];
       return pick || null;
     };
 
