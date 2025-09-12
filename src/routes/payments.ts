@@ -100,8 +100,11 @@ const generateSamplePayments = (): any[] => {
 // @route   POST /api/payments/calculate
 // @access  Private
 router.post('/calculate', async (req, res) => {
+  // Capture filters outside try so they are available in catch
+  let requestFilters: { month?: number; year?: number; fromDate?: string; toDate?: string } = {};
   try {
     const { month, year, fromDate, toDate } = req.body || {};
+    requestFilters = { month, year, fromDate, toDate };
     const from = toDateOnly(fromDate);
     const to = toDateOnly(toDate);
 
@@ -274,9 +277,11 @@ router.post('/calculate', async (req, res) => {
     // Determine the specific error details
     let errorMessage = 'Failed to calculate payments';
     let errorType = 'unknown';
+    let errorStack: string | undefined = undefined;
     
     if (error instanceof Error) {
       errorMessage = error.message;
+      errorStack = error.stack;
       if (error.message.includes('Google Sheets')) {
         errorType = 'google_sheets';
       } else if (error.message.includes('read') || error.message.includes('fetch')) {
@@ -293,10 +298,10 @@ router.post('/calculate', async (req, res) => {
       message: `Calculation Error (${errorType}): ${errorMessage}`,
       errorType,
       errorDetails: {
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        stack: process.env.NODE_ENV === 'development' ? errorStack : undefined,
         timestamp: new Date().toISOString()
       },
-      filters: { month, year, fromDate, toDate },
+      filters: requestFilters,
       counts: {
         attendanceTotal: 0,
         groupSessions: 0,
@@ -684,9 +689,11 @@ router.post('/verify', async (req, res) => {
     // Determine the specific error details
     let errorMessage = 'Failed to verify payments';
     let errorType = 'unknown';
+    let errorStack: string | undefined = undefined;
     
     if (error instanceof Error) {
       errorMessage = error.message;
+      errorStack = error.stack;
       if (error.message.includes('Google Sheets')) {
         errorType = 'google_sheets';
       } else if (error.message.includes('read') || error.message.includes('fetch')) {
@@ -703,7 +710,7 @@ router.post('/verify', async (req, res) => {
       message: `Verification Error (${errorType}): ${errorMessage}`,
       errorType,
       errorDetails: {
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        stack: process.env.NODE_ENV === 'development' ? errorStack : undefined,
         timestamp: new Date().toISOString()
       },
       rows: [],
