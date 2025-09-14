@@ -58,7 +58,7 @@ function classifySession(classType: string): SessionType {
 }
 
 function stripDiacritics(str: string): string {
-  return str.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function normalizeWhitespace(str: string): string {
@@ -94,8 +94,8 @@ function tokenize(str: string): string[] {
 function jaccard(a: string[], b: string[]): number {
   const sa = new Set(a);
   const sb = new Set(b);
-  const inter = new Set([...sa].filter(x => sb.has(x)));
-  const union = new Set([...sa, ...sb]);
+  const inter = new Set(Array.from(sa).filter(x => sb.has(x)));
+  const union = new Set(Array.from(sa).concat(Array.from(sb)));
   if (union.size === 0) return 0;
   return inter.size / union.size;
 }

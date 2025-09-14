@@ -140,7 +140,7 @@ export class DiscountService {
 
     const discountData: InvoiceDiscountData[] = [];
 
-    for (const [invoiceNumber, invoicePayments] of invoiceGroups) {
+    for (const [invoiceNumber, invoicePayments] of Array.from(invoiceGroups.entries())) {
       if (!invoiceNumber) continue;
 
       // Find discount line items (negative amounts)
