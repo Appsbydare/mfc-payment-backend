@@ -3,6 +3,8 @@ import { GoogleSheetsService } from '../services/googleSheets';
 import { paymentVerificationService } from '../services/paymentVerificationService';
 import { verificationMasterService } from '../services/verificationMasterService';
 
+// Updated: Added TypeScript support and Master verification routes
+
 const router = Router();
 const googleSheetsService = new GoogleSheetsService();
 
