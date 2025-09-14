@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { GoogleSheetsService } from '../services/googleSheets';
 import { paymentVerificationService } from '../services/paymentVerificationService';
+import { verificationMasterService } from '../services/verificationMasterService';
 
 const router = Router();
 const googleSheetsService = new GoogleSheetsService();
@@ -199,9 +200,12 @@ router.post('/manual-verify-attendance', async (req, res) => {
     const attendanceData = await googleSheetsService.readSheet('attendance');
     
     // Find and update the attendance record
+    let matchedAttendance: any | null = null;
     const updatedAttendance = attendanceData.map((row: any) => {
-      if (row.id === attendanceId || 
-          (row.Customer === customer && row.Date && row.Time && row.ClassType)) {
+      const isMatch = row.id === attendanceId ||
+        (row.Customer === customer && row.Date && row.Time && row.ClassType);
+      if (isMatch) {
+        matchedAttendance = row;
         return {
           ...row,
           Category: 'Manually Verified',
@@ -234,6 +238,15 @@ router.post('/manual-verify-attendance', async (req, res) => {
 
     await googleSheetsService.clearSheet('Payments');
     await googleSheetsService.writeSheet('Payments', updatedPayments);
+
+    // Also reflect manual verification into Master table if possible
+    try {
+      if (matchedAttendance) {
+        await verificationMasterService.applyManualVerification(matchedAttendance, invoiceNumber);
+      }
+    } catch (e) {
+      console.error('Failed updating Master during manual verification:', e);
+    }
 
     res.json({
       success: true,
@@ -386,3 +399,32 @@ router.post('/enhanced', async (req, res) => {
 });
 
 export default router;
+
+// --- Master verification routes ---
+
+// @desc    Get Master Attendance Verification rows (from payment_calc_detail)
+// @route   GET /api/verification/master
+// @access  Private
+router.get('/master', async (req, res) => {
+  try {
+    const rows = await verificationMasterService.getMasterRows();
+    res.json({ success: true, data: rows, count: rows.length });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to read master verification rows' });
+  }
+});
+
+// @desc    Sync new Attendance rows into Master (append-only)
+// @route   POST /api/verification/master-sync
+// @access  Private
+router.post('/master-sync', async (req, res) => {
+  try {
+    const result = await verificationMasterService.syncMaster();
+    const message = result.appended > 0 ? `Appended ${result.appended} new rows` : 'Uploaded Data already verified!';
+    res.json({ success: true, appended: result.appended, message });
+  } catch (error) {
+    console.error('Master sync failed:', error);
+    res.status(500).json({ success: false, message: 'Master sync failed' });
+  }
+});
+
