@@ -259,6 +259,9 @@ export class VerificationMasterService {
       const managementAmount = +((chosen || 0) * (pct.management / 100)).toFixed(2);
       const mfcAmount = +((chosen || 0) * (pct.mfc / 100)).toFixed(2);
 
+      const applicablePct = typeof discountData?.discount_percentage === 'number' ? +discountData!.discount_percentage.toFixed(2) : undefined;
+      const coachPayType = discountData?.coach_payment_type as ('full' | 'partial' | 'free' | undefined);
+
       const row: MasterRow = {
         UniqueKey: uniqueKey,
         Date: a.Date || '',
@@ -282,8 +285,8 @@ export class VerificationMasterService {
         UnitPrice: sessionPrice,
         EffectiveAmount: chosen || 0,
         DiscountName: discountData?.discount_name || '',
-        ApplicablePercentage: typeof discountData?.discount_percentage === 'number' ? +discountData!.discount_percentage.toFixed(2) : undefined,
-        CoachPaymentType: discountData?.coach_payment_type,
+        ...(applicablePct !== undefined ? { ApplicablePercentage: applicablePct } : {}),
+        ...(coachPayType !== undefined ? { CoachPaymentType: coachPayType } : {}),
 
         CoachAmount: coachAmount,
         BgmAmount: bgmAmount,
