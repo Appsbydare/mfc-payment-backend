@@ -255,37 +255,23 @@ export class AttendanceVerificationService {
     const customerName = this.normalizeCustomerName(attendance.Customer);
     const membershipName = this.normalizeMembershipName(attendance['Membership Name']);
     const attendanceDate = this.parseDate(attendance['Event Starts At'] || attendance.Date || '');
-    
     if (!attendanceDate) return null;
-    
-    // Find payments for the same customer
-    const customerPayments = payments.filter(p => 
-      this.normalizeCustomerName(p.Customer) === customerName
-    );
-    
-    // Look for exact date match first
-    for (const payment of customerPayments) {
-      const paymentDate = this.parseDate(payment.Date);
-      if (paymentDate && this.isSameDate(attendanceDate, paymentDate)) {
-        // Check if memo matches membership
-        const memo = this.normalizeMembershipName(payment.Memo);
-        if (this.isMembershipMatch(membershipName, memo)) {
-          return payment;
-        }
-      }
+
+    const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === customerName);
+    let best: { p: PaymentRecord; score: number } | null = null;
+    const memTokens = this.tokenize(membershipName);
+
+    for (const p of customerPayments) {
+      const pd = this.parseDate(p.Date);
+      if (!pd) continue;
+      const sameDay = this.isSameDate(attendanceDate, pd) ? 1 : 0;
+      const within7 = this.isWithinDays(attendanceDate, pd, 7) ? 0.7 : 0;
+      const memo = String(p.Memo || '');
+      const textScore = this.fuzzyContains(membershipName, memo) ? 1 : this.jaccard(memTokens, this.tokenize(memo));
+      const score = Math.max(sameDay, within7) + textScore;
+      if (!best || score > best.score) best = { p, score };
     }
-    
-    // Look for payments within 7 days
-    for (const payment of customerPayments) {
-      const paymentDate = this.parseDate(payment.Date);
-      if (paymentDate && this.isWithinDays(attendanceDate, paymentDate, 7)) {
-        const memo = this.normalizeMembershipName(payment.Memo);
-        if (this.isMembershipMatch(membershipName, memo)) {
-          return payment;
-        }
-      }
-    }
-    
+    if (best && best.score >= 1.1) return best.p;
     return null;
   }
 
@@ -448,6 +434,44 @@ export class AttendanceVerificationService {
     };
   }
 
+  // Normalization and fuzzy matching helpers
+  private stripDiacritics(value: string): string {
+    return (value && (value as any).normalize) ? (value as any).normalize('NFD').replace(/[\u0300-\u036f]/g, '') : value;
+  }
+
+  private canonicalize(value: string): string {
+    const lower = this.stripDiacritics(String(value || '').toLowerCase());
+    let cleaned = lower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    cleaned = cleaned
+      .replace(/pack(s)?/g, 'pack')
+      .replace(/x\s*(per\s*)?week/g, 'xweek')
+      .replace(/per\s*week/g, 'xweek')
+      .replace(/monthly|month(ly)?/g, 'monthly')
+      .replace(/single\s*(session)?|payg|day\s*pass/g, 'single')
+      .replace(/adult|junior|youth|plan|loyalty|only/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    return cleaned;
+  }
+
+  private tokenize(value: string): Set<string> {
+    const canon = this.canonicalize(value);
+    return new Set(canon.split(' ').filter(Boolean));
+  }
+
+  private jaccard(a: Set<string>, b: Set<string>): number {
+    if (a.size === 0 && b.size === 0) return 1;
+    let inter = 0;
+    a.forEach(t => { if (b.has(t)) inter++; });
+    const union = a.size + b.size - inter;
+    return union === 0 ? 0 : inter / union;
+  }
+
+  private fuzzyContains(a: string, b: string): boolean {
+    const ca = this.canonicalize(a);
+    const cb = this.canonicalize(b);
+    return ca.includes(cb) || cb.includes(ca);
+  }
+
   /**
    * Save master data to Google Sheets
    */
@@ -523,12 +547,9 @@ export class AttendanceVerificationService {
 
   private isMembershipMatch(membership1: string, membership2: string): boolean {
     if (!membership1 || !membership2) return false;
-    
-    // Exact match
-    if (membership1 === membership2) return true;
-    
-    // Partial match (one contains the other)
-    return membership1.includes(membership2) || membership2.includes(membership1);
+    if (this.fuzzyContains(membership1, membership2)) return true;
+    const score = this.jaccard(this.tokenize(membership1), this.tokenize(membership2));
+    return score >= 0.5;
   }
 
   private filterAttendanceByDate(attendance: AttendanceRecord[], fromDate?: string, toDate?: string): AttendanceRecord[] {
