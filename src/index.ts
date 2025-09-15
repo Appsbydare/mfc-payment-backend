@@ -17,6 +17,7 @@ import reportsRoutes from './routes/reports';
 // import verificationRoutes from './routes/verification'; // REMOVED
 import discountRoutes from './routes/discounts';
 import rulesRoutes from './routes/rules';
+import attendanceVerificationRoutes from './routes/attendanceVerification';
 
 // Load environment variables
 dotenv.config();
@@ -72,6 +73,7 @@ app.use('/api/reports', reportsRoutes);
 // app.use('/api/verification', verificationRoutes); // REMOVED
 app.use('/api/discounts', discountRoutes);
 app.use('/api/rules', rulesRoutes);
+app.use('/api/attendance-verification', attendanceVerificationRoutes);
 
 // 404 handler
 app.use(notFound);
