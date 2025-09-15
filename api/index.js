@@ -37,19 +37,8 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Root health check endpoint
-app.get('/', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    message: 'MFC Payment System API is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    version: '1.0.0'
-  });
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
+// Health check endpoint (both /api/health and /health for compatibility)
+app.get(['/api/health', '/health'], (req, res) => {
   res.status(200).json({
     status: 'OK',
     message: 'MFC Payment System API is running',
@@ -68,14 +57,14 @@ const rulesRoutes = require('./rules');
 const reportsRoutes = require('./reports');
 const attendanceVerificationRoutes = require('./attendanceVerification');
 
-// API routes
-app.use('/auth', authRoutes);
-app.use('/data', dataRoutes);
-app.use('/payments', paymentsRoutes);
-app.use('/reports', reportsRoutes);
-app.use('/rules', rulesRoutes);
-app.use('/discounts', discountsRoutes);
-app.use('/attendance-verification', attendanceVerificationRoutes);
+// API routes (mounted under /api/*)
+app.use('/api/auth', authRoutes);
+app.use('/api/data', dataRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/rules', rulesRoutes);
+app.use('/api/discounts', discountsRoutes);
+app.use('/api/attendance-verification', attendanceVerificationRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
