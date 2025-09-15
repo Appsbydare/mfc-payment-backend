@@ -179,7 +179,37 @@ export class AttendanceVerificationService {
       googleSheetsService.readSheet(this.DISCOUNTS_SHEET).catch(() => [])
     ]);
 
-    return { attendance, payments, rules, discounts };
+    // Ensure alias columns exist in rules for standardization
+    const normalizedRules = await this.ensureRuleAliasColumns(rules);
+
+    return { attendance, payments, rules: normalizedRules, discounts };
+  }
+
+  /**
+   * Ensure rules contain alias columns for standardized matching.
+   * Adds columns if missing and persists back to Google Sheets once.
+   */
+  private async ensureRuleAliasColumns(rules: any[]): Promise<any[]> {
+    if (!rules || rules.length === 0) return rules;
+    const sample = rules[0] || {};
+    const hasAttendanceAlias = 'attendance_alias' in sample || 'attendance_membership' in sample || 'attendance_name' in sample;
+    const hasMemoAlias = 'payment_memo_alias' in sample || 'memo_alias' in sample || 'memo_pattern' in sample;
+    if (hasAttendanceAlias && hasMemoAlias) return rules;
+
+    // Extend objects with empty aliases (default to package_name to bootstrap)
+    const extended = rules.map((r: any) => ({
+      ...r,
+      attendance_alias: r.attendance_alias ?? r.attendance_membership ?? r.attendance_name ?? (r.package_name || ''),
+      payment_memo_alias: r.payment_memo_alias ?? r.memo_alias ?? r.memo_pattern ?? (r.package_name || ''),
+    }));
+
+    try {
+      await googleSheetsService.writeSheet(this.RULES_SHEET, extended);
+      console.log('✅ Ensured rules alias columns (attendance_alias, payment_memo_alias)');
+    } catch (e) {
+      console.warn('Could not persist alias columns to rules sheet:', (e as any)?.message || e);
+    }
+    return extended;
   }
 
   /**
@@ -195,7 +225,7 @@ export class AttendanceVerificationService {
     // Normalize attendance data
     const customerName = attendance.Customer || '';
     const eventStartsAt = attendance['Event Starts At'] || attendance.Date || '';
-    const membershipName = attendance['Membership Name'] || '';
+    const membershipName = String(attendance['Membership Name'] || '');
     const instructors = attendance.Instructors || '';
     const status = attendance.Status || '';
     
@@ -219,7 +249,7 @@ export class AttendanceVerificationService {
     const discount = discountInfo?.name || '';
     const discountPercentage = discountInfo?.applicable_percentage || 0;
     
-    const sessionPrice = this.calculateSessionPrice({ baseAmount: amount, rule, discountInfo });
+    const sessionPrice = this.round2(this.calculateSessionPrice({ baseAmount: amount, rule, discountInfo }));
     const amounts = this.calculateAmounts(sessionPrice, rule, sessionType);
     
     // Generate unique key
@@ -238,10 +268,10 @@ export class AttendanceVerificationService {
       amount,
       paymentDate,
       sessionPrice,
-      coachAmount: amounts.coach,
-      bgmAmount: amounts.bgm,
-      managementAmount: amounts.management,
-      mfcAmount: amounts.mfc,
+      coachAmount: this.round2(amounts.coach),
+      bgmAmount: this.round2(amounts.bgm),
+      managementAmount: this.round2(amounts.management),
+      mfcAmount: this.round2(amounts.mfc),
       uniqueKey,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -357,31 +387,23 @@ export class AttendanceVerificationService {
    * Find matching rule for membership and session type
    */
   private findMatchingRule(membershipName: string, sessionType: string, rules: any[]): any | null {
-    // First try exact membership match
-    let rule = rules.find(r => 
-      r.package_name && 
-      r.package_name.toLowerCase() === membershipName.toLowerCase() &&
-      r.session_type === sessionType
-    );
-    
-    if (rule) return rule;
-    
-    // Then try partial membership match
-    rule = rules.find(r => 
-      r.package_name && 
-      membershipName.toLowerCase().includes(r.package_name.toLowerCase()) &&
-      r.session_type === sessionType
-    );
-    
-    if (rule) return rule;
-    
-    // Finally try default rule for session type
-    rule = rules.find(r => 
-      (!r.package_name || r.package_name === '') &&
-      r.session_type === sessionType
-    );
-    
-    return rule || null;
+    if (!rules || rules.length === 0) return null;
+    const canonMembership = this.canonicalize(membershipName);
+
+    // Score rules by alias/package similarity
+    let best: { r: any; score: number } | null = null;
+    const memTokens = this.tokenize(canonMembership);
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const alias = r.attendance_alias || r.package_name || '';
+      const score = this.fuzzyContains(alias, membershipName) ? 1.5 : this.jaccard(memTokens, this.tokenize(alias));
+      if (!best || score > best.score) best = { r, score };
+    }
+    if (best && best.score >= 0.5) return best.r;
+
+    // Fallback default rule for session type
+    const def = rules.find(r => (!r.package_name || r.package_name === '') && r.session_type === sessionType);
+    return def || null;
   }
 
   /**
@@ -592,6 +614,10 @@ export class AttendanceVerificationService {
       
       return true;
     });
+  }
+
+  private round2(n: number): number {
+    return Math.round((n || 0) * 100) / 100;
   }
 }
 
