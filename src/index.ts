@@ -14,7 +14,7 @@ import authRoutes from './routes/auth';
 import dataRoutes from './routes/data';
 import paymentsRoutes from './routes/payments';
 import reportsRoutes from './routes/reports';
-import verificationRoutes from './routes/verification';
+// import verificationRoutes from './routes/verification'; // REMOVED
 import discountRoutes from './routes/discounts';
 import rulesRoutes from './routes/rules';
 
@@ -69,7 +69,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/reports', reportsRoutes);
-app.use('/api/verification', verificationRoutes);
+// app.use('/api/verification', verificationRoutes); // REMOVED
 app.use('/api/discounts', discountRoutes);
 app.use('/api/rules', rulesRoutes);
 
