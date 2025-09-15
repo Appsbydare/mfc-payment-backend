@@ -223,11 +223,11 @@ export class AttendanceVerificationService {
   ): Promise<AttendanceVerificationMasterRow> {
     
     // Normalize attendance data
-    const customerName = attendance.Customer || '';
-    const eventStartsAt = attendance['Event Starts At'] || attendance.Date || '';
-    const membershipName = String(attendance['Membership Name'] || '');
-    const instructors = attendance.Instructors || '';
-    const status = attendance.Status || '';
+    const customerName = this.getField(attendance as any, ['Customer Name','Customer']) || '';
+    const eventStartsAt = this.getField(attendance as any, ['Event Starts At','EventStartAt','EventStart','Date']) || '';
+    const membershipName = this.getField(attendance as any, ['Membership Name','Membership','MembershipName']) || '';
+    const instructors = this.getField(attendance as any, ['Instructors','Instructor']) || '';
+    const status = this.getField(attendance as any, ['Status']) || '';
     
     // Find matching payment record
     const matchingPayment = this.findMatchingPayment(attendance, payments);
@@ -454,6 +454,23 @@ export class AttendanceVerificationService {
       createdAt: row.createdAt || '',
       updatedAt: row.updatedAt || ''
     };
+  }
+
+  private getField(obj: any, keys: string[]): string {
+    if (!obj) return '';
+    for (const k of keys) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        const v = obj[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+      }
+      // try case-insensitive match
+      const foundKey = Object.keys(obj).find(kk => kk.toLowerCase().trim() === k.toLowerCase().trim());
+      if (foundKey) {
+        const v = obj[foundKey];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+      }
+    }
+    return '';
   }
 
   // Normalization and fuzzy matching helpers
