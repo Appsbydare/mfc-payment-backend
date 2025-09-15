@@ -12,7 +12,6 @@ import { notFound } from './middleware/notFound';
 import { initializeDatabase } from './config/database';
 import authRoutes from './routes/auth';
 import dataRoutes from './routes/data';
-import paymentsRoutes from './routes/payments';
 import reportsRoutes from './routes/reports';
 // import verificationRoutes from './routes/verification'; // REMOVED
 import discountRoutes from './routes/discounts';
@@ -68,7 +67,6 @@ app.get('/api/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/data', dataRoutes);
-app.use('/api/payments', paymentsRoutes);
 app.use('/api/reports', reportsRoutes);
 // app.use('/api/verification', verificationRoutes); // REMOVED
 app.use('/api/discounts', discountRoutes);
