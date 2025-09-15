@@ -103,16 +103,15 @@ export class AttendanceVerificationService {
       const existingMaster = await this.loadExistingMasterData();
       const existingKeys = new Set(existingMaster.map(row => row.uniqueKey));
       
-      // Process each attendance record
+      // Build a map of existing rows by uniqueKey to avoid duplicates
+      const existingByKey = new Map(existingMaster.map(r => [r.uniqueKey, r] as const));
       const newMasterRows: AttendanceVerificationMasterRow[] = [];
       let processedCount = 0;
       
       for (const attendanceRecord of filteredAttendance) {
         // Skip if already processed and not forcing reverification
         const uniqueKey = this.generateUniqueKey(attendanceRecord);
-        if (!params.forceReverify && existingKeys.has(uniqueKey)) {
-          continue;
-        }
+        if (!params.forceReverify && existingKeys.has(uniqueKey)) continue;
         
         const masterRow = await this.processAttendanceRecord(
           attendanceRecord,
@@ -121,12 +120,18 @@ export class AttendanceVerificationService {
           discounts
         );
         
-        newMasterRows.push(masterRow);
+        // Upsert: replace existing or add new
+        if (existingByKey.has(masterRow.uniqueKey)) {
+          existingByKey.set(masterRow.uniqueKey, masterRow);
+        } else {
+          existingByKey.set(masterRow.uniqueKey, masterRow);
+          newMasterRows.push(masterRow);
+        }
         processedCount++;
       }
       
-      // Combine existing and new data
-      const allMasterRows = [...existingMaster, ...newMasterRows];
+      // Combine into a stable array
+      const allMasterRows = Array.from(existingByKey.values());
       
       // Save to Google Sheets
       if (newMasterRows.length > 0) {
@@ -447,36 +452,30 @@ export class AttendanceVerificationService {
    * Save master data to Google Sheets
    */
   private async saveMasterData(rows: AttendanceVerificationMasterRow[]): Promise<void> {
-    const headers = [
-      'Customer Name', 'Event Starts At', 'Membership Name', 'Instructors', 'Status',
-      'Discount', 'Discount %', 'Verification Status', 'Invoice #', 'Amount',
-      'Payment Date', 'Session Price', 'Coach Amount', 'BGM Amount', 'Management Amount', 'MFC Amount',
-      'UniqueKey', 'CreatedAt', 'UpdatedAt'
-    ];
+    // Write as array of objects so the GoogleSheetsService can derive headers correctly
+    const dataObjects = rows.map(row => ({
+      'Customer Name': row.customerName,
+      'Event Starts At': row.eventStartsAt,
+      'Membership Name': row.membershipName,
+      'Instructors': row.instructors,
+      'Status': row.status,
+      'Discount': row.discount,
+      'Discount %': row.discountPercentage,
+      'Verification Status': row.verificationStatus,
+      'Invoice #': row.invoiceNumber,
+      'Amount': row.amount,
+      'Payment Date': row.paymentDate,
+      'Session Price': row.sessionPrice,
+      'Coach Amount': row.coachAmount,
+      'BGM Amount': row.bgmAmount,
+      'Management Amount': row.managementAmount,
+      'MFC Amount': row.mfcAmount,
+      'UniqueKey': row.uniqueKey,
+      'CreatedAt': row.createdAt,
+      'UpdatedAt': row.updatedAt
+    }));
     
-    const data = rows.map(row => [
-      row.customerName,
-      row.eventStartsAt,
-      row.membershipName,
-      row.instructors,
-      row.status,
-      row.discount,
-      row.discountPercentage,
-      row.verificationStatus,
-      row.invoiceNumber,
-      row.amount,
-      row.paymentDate,
-      row.sessionPrice,
-      row.coachAmount,
-      row.bgmAmount,
-      row.managementAmount,
-      row.mfcAmount,
-      row.uniqueKey,
-      row.createdAt,
-      row.updatedAt
-    ]);
-    
-    await googleSheetsService.writeSheet(this.MASTER_SHEET, [headers, ...data]);
+    await googleSheetsService.writeSheet(this.MASTER_SHEET, dataObjects);
   }
 
   /**
