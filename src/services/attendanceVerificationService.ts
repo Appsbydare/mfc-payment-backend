@@ -686,13 +686,24 @@ export class AttendanceVerificationService {
 
     if (invoiceToDiscount.size === 0) return master;
 
-    // Update master rows by invoice number
+    // Update master rows by invoice number and recalc monetary fields
     const updated = master.map(r => {
       const inv = String(r.invoiceNumber || '').trim();
       if (!inv) return r;
       const found = invoiceToDiscount.get(inv);
       if (!found) return r;
-      return { ...r, discount: found.name, discountPercentage: found.pct };
+      const factor = 1 - (Number(found.pct) || 0) / 100;
+      return {
+        ...r,
+        discount: found.name,
+        discountPercentage: found.pct,
+        amount: this.round2((r.amount || 0) * factor),
+        sessionPrice: this.round2((r.sessionPrice || 0) * factor),
+        coachAmount: this.round2((r.coachAmount || 0) * factor),
+        bgmAmount: this.round2((r.bgmAmount || 0) * factor),
+        managementAmount: this.round2((r.managementAmount || 0) * factor),
+        mfcAmount: this.round2((r.mfcAmount || 0) * factor)
+      };
     });
 
     return updated;
