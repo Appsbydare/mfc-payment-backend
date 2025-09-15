@@ -6,8 +6,7 @@ const router = express.Router();
 // Get master data
 router.get('/master', async (req, res) => {
   try {
-    const { fromDate, toDate } = req.query;
-    const result = await attendanceVerificationService.getMasterData({ fromDate, toDate });
+    const result = await attendanceVerificationService.getMasterData();
     res.json({
       success: true,
       data: result.masterRows,
@@ -26,12 +25,7 @@ router.get('/master', async (req, res) => {
 // Verify attendance data
 router.post('/verify', async (req, res) => {
   try {
-    const { fromDate, toDate, forceReverify } = req.body;
-    const result = await attendanceVerificationService.verifyAttendanceData({ 
-      fromDate, 
-      toDate, 
-      forceReverify 
-    });
+    const result = await attendanceVerificationService.verifyAttendanceData();
     res.json({
       success: true,
       message: result.message,
