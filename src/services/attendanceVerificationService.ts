@@ -205,16 +205,16 @@ export class AttendanceVerificationService {
     const amount = matchingPayment ? parseFloat(String(matchingPayment.Amount)) : 0;
     const paymentDate = matchingPayment?.Date || '';
     
-    // Find applicable discount
+    // Calculate based on Rules first, then apply Discounts
+    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
+    const rule = this.findMatchingRule(membershipName, sessionType, rules);
+    
+    // Find applicable discount AFTER rule lookup
     const discountInfo = await this.findApplicableDiscount(matchingPayment, discounts);
     const discount = discountInfo?.name || '';
     const discountPercentage = discountInfo?.applicable_percentage || 0;
     
-    // Calculate session price and amounts based on rules
-    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
-    const rule = this.findMatchingRule(membershipName, sessionType, rules);
-    
-    const sessionPrice = this.calculateSessionPrice(amount, discountInfo, rule);
+    const sessionPrice = this.calculateSessionPrice({ baseAmount: amount, rule, discountInfo });
     const amounts = this.calculateAmounts(sessionPrice, rule, sessionType);
     
     // Generate unique key
@@ -313,16 +313,22 @@ export class AttendanceVerificationService {
   /**
    * Calculate session price based on payment amount and discount
    */
-  private calculateSessionPrice(amount: number, discountInfo: any, rule: any): number {
-    if (discountInfo && discountInfo.coach_payment_type === 'free') {
-      return 0;
-    }
+  private calculateSessionPrice(params: { baseAmount: number; rule: any; discountInfo: any }): number {
+    const { baseAmount, rule, discountInfo } = params;
+    // Start from rule price if available, otherwise the observed base amount
+    let price = (rule && typeof rule.price === 'number' && rule.price > 0) ? Number(rule.price) : Number(baseAmount || 0);
     
-    if (rule && rule.price > 0) {
-      return rule.price;
-    }
+    if (!discountInfo) return price;
+    const pct = Number(discountInfo.applicable_percentage || 0);
+    const type = String(discountInfo.coach_payment_type || 'partial').toLowerCase();
     
-    return amount;
+    if (type === 'free') return 0;
+    if (type === 'full') return price; // treat as normal full price
+    if (type === 'partial' && pct > 0) {
+      // Reduce price by discount percentage
+      return price * (1 - pct / 100);
+    }
+    return price;
   }
 
   /**
