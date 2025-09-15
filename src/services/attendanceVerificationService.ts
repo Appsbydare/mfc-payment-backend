@@ -290,13 +290,13 @@ export class AttendanceVerificationService {
   private async findApplicableDiscount(payment: PaymentRecord | null, discounts: any[]): Promise<any | null> {
     if (!payment) return null;
     
-    const memo = payment.Memo || '';
-    const amount = parseFloat(String(payment.Amount));
+    const memo = String(payment.Memo || '');
+    const amount = parseFloat(String(payment.Amount || '0')) || 0;
     
     // Look for exact discount code match
     for (const discount of discounts) {
-      if (discount.active && discount.discount_code) {
-        if (memo.toLowerCase().includes(discount.discount_code.toLowerCase())) {
+      if (discount && discount.active && discount.discount_code) {
+        if (memo.toLowerCase().includes(String(discount.discount_code).toLowerCase())) {
           return discount;
         }
       }
@@ -397,7 +397,7 @@ export class AttendanceVerificationService {
    * Classify session type based on offering type
    */
   private classifySessionType(offeringType: string): 'group' | 'private' {
-    const type = offeringType.toLowerCase();
+    const type = String(offeringType || '').toLowerCase();
     if (type.includes('private') || type.includes('1 to 1') || type.includes('1-to-1')) {
       return 'private';
     }
@@ -499,11 +499,11 @@ export class AttendanceVerificationService {
 
   // Utility methods
   private normalizeCustomerName(name: string): string {
-    return name.toLowerCase().trim();
+    return String(name || '').toLowerCase().trim();
   }
 
   private normalizeMembershipName(name: string): string {
-    return name.toLowerCase().trim();
+    return String(name || '').toLowerCase().trim();
   }
 
   private parseDate(dateStr: string): Date | null {
