@@ -131,7 +131,10 @@ export class AttendanceVerificationService {
       }
       
       // Combine into a stable array
-      const allMasterRows = Array.from(existingByKey.values());
+      let allMasterRows = Array.from(existingByKey.values());
+
+      // Apply discount identification at the end using payments + discounts
+      allMasterRows = this.applyDiscountsFromPayments(allMasterRows, filteredPayments, discounts);
       
       // Save to Google Sheets
       if (params.forceReverify || newMasterRows.length > 0) {
@@ -635,6 +638,64 @@ export class AttendanceVerificationService {
 
   private round2(n: number): number {
     return Math.round((n || 0) * 100) / 100;
+  }
+
+  /**
+   * Post-process: find discounts in payments by scanning memo text, then
+   * update master rows' Discount and Discount % by matching invoice number (and customer when available).
+   */
+  private applyDiscountsFromPayments(
+    master: AttendanceVerificationMasterRow[],
+    payments: PaymentRecord[],
+    discounts: any[]
+  ): AttendanceVerificationMasterRow[] {
+    if (!discounts || discounts.length === 0 || !payments || payments.length === 0) return master;
+
+    // Build invoice -> discount mapping
+    const invoiceToDiscount = new Map<string, { name: string; pct: number }>();
+
+    const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+
+    for (const p of payments) {
+      const memo = String(p.Memo || '');
+      const invoice = String(p.Invoice || '').trim();
+      if (!invoice || !memo) continue;
+
+      for (const d of activeDiscounts) {
+        const code = String(d.discount_code || d.name || '').trim();
+        if (!code) continue;
+        const matchType = String(d.match_type || 'contains').toLowerCase();
+        let matched = false;
+        if (matchType === 'exact') {
+          matched = this.canonicalize(memo) === this.canonicalize(code);
+        } else if (matchType === 'regex') {
+          try { matched = new RegExp(code, 'i').test(memo); } catch {}
+        } else {
+          matched = this.canonicalize(memo).includes(this.canonicalize(code));
+        }
+        if (matched) {
+          const pct = Number(d.applicable_percentage || 0) || 0;
+          // Prefer higher percentage if multiple match
+          const existing = invoiceToDiscount.get(invoice);
+          if (!existing || pct > existing.pct) {
+            invoiceToDiscount.set(invoice, { name: String(d.name || code), pct });
+          }
+        }
+      }
+    }
+
+    if (invoiceToDiscount.size === 0) return master;
+
+    // Update master rows by invoice number
+    const updated = master.map(r => {
+      const inv = String(r.invoiceNumber || '').trim();
+      if (!inv) return r;
+      const found = invoiceToDiscount.get(inv);
+      if (!found) return r;
+      return { ...r, discount: found.name, discountPercentage: found.pct };
+    });
+
+    return updated;
   }
 }
 
