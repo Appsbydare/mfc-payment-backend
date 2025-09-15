@@ -62,7 +62,17 @@ const normalizeRule = (r) => ({
   id: String(r.id || r.ID || '').trim() || '',
   rule_name: String(r.rule_name || r.name || r.rule || '').trim(),
   package_name: String(r.package_name || r.membership_name || r.name || '').trim(),
-  session_type: String(r.session_type || r.category || '').trim().toLowerCase(),
+  // Map UI labels/flags to canonical session_type
+  session_type: (() => {
+    const raw = String((r.session_type ?? r.category ?? '')).trim().toLowerCase();
+    if (raw) {
+      if (/^priv/.test(raw)) return 'private';
+      if (/^group/.test(raw)) return 'group';
+    }
+    const privateFlag = String(r.privateSession ?? '').toLowerCase();
+    if (privateFlag === 'true' || privateFlag === '1') return 'private';
+    return 'group';
+  })(),
   price: toNum(r.price),
   sessions: toNum(r.sessions),
   sessions_per_pack: toNum(r.sessions_per_pack || r.sessions),

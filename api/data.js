@@ -356,11 +356,11 @@ router.post('/import', upload.fields([
 router.get('/sheets', async (req, res) => {
   try {
     const { sheet } = req.query;
-    
-    if (!sheet || !['attendance', 'payments'].includes(sheet)) {
+    // Allow flexible sheets including 'discounts', 'rules', and others used by the app
+    if (!sheet || typeof sheet !== 'string' || !sheet.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'Sheet parameter is required and must be either "attendance" or "payments"'
+        message: 'Sheet parameter is required'
       });
     }
 
