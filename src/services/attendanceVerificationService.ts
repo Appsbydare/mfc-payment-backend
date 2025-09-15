@@ -134,9 +134,9 @@ export class AttendanceVerificationService {
       const allMasterRows = Array.from(existingByKey.values());
       
       // Save to Google Sheets
-      if (newMasterRows.length > 0) {
+      if (params.forceReverify || newMasterRows.length > 0) {
         await this.saveMasterData(allMasterRows);
-        console.log(`✅ Saved ${newMasterRows.length} new verification records`);
+        console.log(`✅ Saved ${params.forceReverify ? allMasterRows.length : newMasterRows.length} verification records`);
       }
       
       // Calculate summary

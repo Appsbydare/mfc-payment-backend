@@ -39,7 +39,7 @@ router.get('/master', async (req, res) => {
  */
 router.post('/verify', async (req, res) => {
   try {
-    const { fromDate, toDate, forceReverify = false } = req.body;
+    const { fromDate, toDate, forceReverify = true } = req.body; // default to true to recompute all
     
     console.log('🔄 Starting verification process...');
     
@@ -305,6 +305,22 @@ router.get('/export', async (req, res) => {
       success: false,
       error: error.message || 'Export failed'
     });
+  }
+});
+
+/**
+ * @desc    Rewrite master verification sheet from current computed data
+ * @route   POST /api/attendance-verification/rewrite
+ * @access  Private
+ */
+router.post('/rewrite', async (req, res) => {
+  try {
+    const { fromDate, toDate } = req.body || {};
+    const result = await attendanceVerificationService.verifyAttendanceData({ fromDate, toDate, forceReverify: true });
+    return res.json({ success: true, message: 'Master sheet rewritten successfully', summary: result.summary });
+  } catch (error: any) {
+    console.error('Error rewriting master sheet:', error);
+    res.status(500).json({ success: false, error: error.message || 'Rewrite failed' });
   }
 });
 
