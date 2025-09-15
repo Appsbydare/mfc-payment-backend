@@ -66,7 +66,7 @@ const paymentsRoutes = require('./payments');
 const discountsRoutes = require('./discounts');
 const rulesRoutes = require('./rules');
 const reportsRoutes = require('./reports');
-// const verificationRoutes = require('./verification'); // REMOVED
+const attendanceVerificationRoutes = require('./attendanceVerification');
 
 // API routes
 app.use('/auth', authRoutes);
@@ -74,8 +74,8 @@ app.use('/data', dataRoutes);
 app.use('/payments', paymentsRoutes);
 app.use('/reports', reportsRoutes);
 app.use('/rules', rulesRoutes);
-// app.use('/verification', verificationRoutes); // REMOVED
 app.use('/discounts', discountsRoutes);
+app.use('/attendance-verification', attendanceVerificationRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

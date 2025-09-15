@@ -1,9 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "functions": {
-    "dist/index.js": {
+    "api/index.js": {
       "maxDuration": 30,
       "memory": 1024
     }
@@ -11,7 +9,7 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/dist/index"
+      "dest": "/api/index"
     }
   ]
 } 
