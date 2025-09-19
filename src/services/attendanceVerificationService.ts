@@ -216,12 +216,7 @@ export class AttendanceVerificationService {
       price: toNum(r.price),
       sessions: toNum(r.sessions),
       sessions_per_pack: toNum(r.sessions_per_pack || r.sessions),
-      unit_price: (() => {
-        if (r.unit_price) return toNum(r.unit_price);
-        const price = toNum(r.price);
-        const sessions = toNum(r.sessions || r.sessions_per_pack);
-        return (price && sessions && price !== null && sessions !== null && sessions > 0) ? (price / sessions) : 0;
-      })(),
+      unit_price: toNum(r.unit_price, null), // Use exact unit_price from database, no calculation
       coach_percentage: toNum(r.coach_percentage || r.coachPct, null),
       bgm_percentage: toNum(r.bgm_percentage || r.bgmPct, null),
       management_percentage: toNum(r.management_percentage || r.mgmtPct, null),
@@ -408,21 +403,20 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Calculate session price based on rule unit_price and discount
+   * Calculate session price based on exact rule unit_price from database and discount
    */
   private calculateSessionPrice(params: { baseAmount: number; rule: any; discountInfo: any }): number {
     const { rule, discountInfo } = params;
     
-    // Use rule's unit_price (per-session price) as the base, not the payment amount
+    // Use exact unit_price from the rules database (with manual adjustments)
     let price = 0;
-    if (rule && typeof rule.unit_price === 'number' && rule.unit_price > 0) {
+    if (rule && rule.unit_price !== null && rule.unit_price !== undefined && rule.unit_price > 0) {
       price = Number(rule.unit_price);
-    } else if (rule && typeof rule.price === 'number' && rule.sessions && rule.sessions > 0) {
-      // Fallback: calculate unit price from total price and sessions
-      price = Number(rule.price) / Number(rule.sessions);
+      console.log(`✅ Using exact unit_price from database: ${price}`);
     } else {
-      // Last resort: use payment amount (but this should be avoided)
+      // Only use payment amount if no unit_price is set in the rule
       price = Number(params.baseAmount || 0);
+      console.log(`⚠️ No unit_price in rule, using payment amount: ${price}`);
     }
     
     if (!discountInfo) return price;
