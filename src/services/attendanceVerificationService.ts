@@ -470,38 +470,52 @@ export class AttendanceVerificationService {
     if (!rules || rules.length === 0) return null;
     const canonMembership = this.canonicalize(membershipName);
 
-    // First, try exact matching with attendance_alias
+    console.log(`🔍 Looking for rule: "${membershipName}" (${sessionType})`);
+
+    // First, try exact matching with package_name (highest priority)
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
-      const attendanceAlias = String(r.attendance_alias || '').trim();
-      if (attendanceAlias && this.canonicalize(attendanceAlias) === this.canonicalize(membershipName)) {
-        console.log(`✅ Exact match found: "${attendanceAlias}" = "${membershipName}"`);
+      const packageName = String(r.package_name || '').trim();
+      if (packageName && this.canonicalize(packageName) === this.canonicalize(membershipName)) {
+        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
         return r;
       }
     }
 
-    // Second, try fuzzy matching with attendance_alias (higher priority)
+    // Second, try exact matching with attendance_alias
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      if (attendanceAlias && this.canonicalize(attendanceAlias) === this.canonicalize(membershipName)) {
+        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
+        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
+        return r;
+      }
+    }
+
+    // Third, try fuzzy matching with package_name (higher priority than attendance_alias)
     let best: { r: any; score: number } | null = null;
     const memTokens = this.tokenize(canonMembership);
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
-      const attendanceAlias = String(r.attendance_alias || '').trim();
       const packageName = String(r.package_name || '').trim();
+      const attendanceAlias = String(r.attendance_alias || '').trim();
       
       let score = 0;
-      if (attendanceAlias) {
-        // Higher priority for attendance_alias matches
-        if (this.fuzzyContains(attendanceAlias, membershipName)) {
-          score = 2.0; // Highest score for attendance_alias fuzzy match
-        } else {
-          score = this.jaccard(memTokens, this.tokenize(attendanceAlias)) * 1.5; // Boost attendance_alias
-        }
-      } else if (packageName) {
-        // Lower priority for package_name matches
+      if (packageName) {
+        // Higher priority for package_name matches
         if (this.fuzzyContains(packageName, membershipName)) {
+          score = 2.0; // Highest score for package_name fuzzy match
+        } else {
+          score = this.jaccard(memTokens, this.tokenize(packageName)) * 1.5; // Boost package_name
+        }
+      } else if (attendanceAlias) {
+        // Lower priority for attendance_alias matches
+        if (this.fuzzyContains(attendanceAlias, membershipName)) {
           score = 1.5;
         } else {
-          score = this.jaccard(memTokens, this.tokenize(packageName));
+          score = this.jaccard(memTokens, this.tokenize(attendanceAlias));
         }
       }
       
@@ -511,7 +525,8 @@ export class AttendanceVerificationService {
     }
     
     if (best && best.score >= 0.5) {
-      console.log(`✅ Fuzzy match found: score ${best.score.toFixed(2)} for "${membershipName}"`);
+      console.log(`✅ FUZZY match found: score ${best.score.toFixed(2)} for "${membershipName}"`);
+      console.log(`📊 Rule details: unit_price=${best.r.unit_price}, price=${best.r.price}, sessions=${best.r.sessions}`);
       return best.r;
     }
 
