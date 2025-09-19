@@ -21,7 +21,8 @@ export interface AttendanceVerificationMasterRow {
   
   // Calculated fields based on Rules + Discount information
   packagePrice: number; // From rules sheet column E (price)
-  sessionPrice: number;
+  sessionPrice: number; // Original unit_price from rules (column H)
+  discountedSessionPrice: number; // Session price after applying discounts
   coachAmount: number;
   bgmAmount: number;
   managementAmount: number;
@@ -276,10 +277,11 @@ export class AttendanceVerificationService {
     console.log(`📋 Rule found:`, rule ? {
       id: rule.id,
       rule_name: rule.rule_name,
+      package_name: rule.package_name,
+      attendance_alias: rule.attendance_alias,
       unit_price: rule.unit_price,
       price: rule.price,
-      sessions: rule.sessions,
-      attendance_alias: rule.attendance_alias
+      sessions: rule.sessions
     } : 'No rule found');
     
     // Find applicable discount AFTER rule lookup
@@ -287,9 +289,16 @@ export class AttendanceVerificationService {
     const discount = discountInfo?.name || '';
     const discountPercentage = discountInfo?.applicable_percentage || 0;
     
-    const sessionPrice = this.round2(this.calculateSessionPrice({ baseAmount: amount, rule, discountInfo }));
-    console.log(`💰 Session Price calculated: ${sessionPrice} (from rule: ${rule?.unit_price || 'N/A'}, payment: ${amount})`);
-    const amounts = this.calculateAmounts(sessionPrice, rule, sessionType);
+    // Get original session price from rule (column H) - this should NOT be modified
+    const sessionPrice = rule ? this.round2(Number(rule.unit_price || 0)) : 0;
+    console.log(`💰 Original Session Price: ${sessionPrice} (from rule: ${rule?.unit_price || 'N/A'})`);
+    
+    // Calculate discounted session price for calculations
+    const discountedSessionPrice = this.round2(this.calculateDiscountedSessionPrice({ baseAmount: amount, rule, discountInfo }));
+    console.log(`💸 Discounted Session Price: ${discountedSessionPrice} (original: ${sessionPrice}, discount: ${discountPercentage}%)`);
+    
+    // Use discounted session price for all calculations
+    const amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
     
     // Get package price from rule (column E)
     const packagePrice = rule ? this.round2(Number(rule.price || 0)) : 0;
@@ -312,6 +321,7 @@ export class AttendanceVerificationService {
       paymentDate,
       packagePrice,
       sessionPrice,
+      discountedSessionPrice,
       coachAmount: this.round2(amounts.coach),
       bgmAmount: this.round2(amounts.bgm),
       managementAmount: this.round2(amounts.management),
@@ -409,12 +419,12 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Calculate session price based on exact rule unit_price from database and discount
+   * Calculate discounted session price for calculations (original session price remains unchanged)
    */
-  private calculateSessionPrice(params: { baseAmount: number; rule: any; discountInfo: any }): number {
+  private calculateDiscountedSessionPrice(params: { baseAmount: number; rule: any; discountInfo: any }): number {
     const { rule, discountInfo } = params;
     
-    // Use exact unit_price from the rules database (with manual adjustments)
+    // Use exact unit_price from the rules database as base
     let price = 0;
     if (rule && rule.unit_price !== null && rule.unit_price !== undefined && rule.unit_price > 0) {
       price = Number(rule.unit_price);
@@ -425,6 +435,7 @@ export class AttendanceVerificationService {
       console.log(`⚠️ No unit_price in rule, using payment amount: ${price}`);
     }
     
+    // Apply discount to get discounted price for calculations
     if (!discountInfo) return price;
     const pct = Number(discountInfo.applicable_percentage || 0);
     const type = String(discountInfo.coach_payment_type || 'partial').toLowerCase();
@@ -482,7 +493,7 @@ export class AttendanceVerificationService {
       id: r.id,
       rule_name: r.rule_name,
       package_name: r.package_name,
-      attendance_alias: r.attendance_alias,
+      attendance_alias: r.attendance_alias || '(empty)',
       unit_price: r.unit_price,
       price: r.price
     })));
@@ -497,6 +508,7 @@ export class AttendanceVerificationService {
         return r;
       }
     }
+    console.log(`⚠️ No attendance_alias matches found for "${membershipName}"`);
 
     // Second, try exact matching with package_name (fallback)
     for (const r of rules) {
@@ -508,6 +520,7 @@ export class AttendanceVerificationService {
         return r;
       }
     }
+    console.log(`⚠️ No exact package_name matches found for "${membershipName}"`);
 
     // Third, try fuzzy matching with attendance_alias (higher priority than package_name)
     let best: { r: any; score: number } | null = null;
@@ -605,6 +618,7 @@ export class AttendanceVerificationService {
       paymentDate: row.paymentDate || row['Payment Date'] || '',
       packagePrice: parseFloat(row.packagePrice || row['Package Price'] || '0'),
       sessionPrice: parseFloat(row.sessionPrice || row['Session Price'] || '0'),
+      discountedSessionPrice: parseFloat(row.discountedSessionPrice || row['Discounted Session Price'] || '0'),
       coachAmount: parseFloat(row.coachAmount || row['Coach Amount'] || '0'),
       bgmAmount: parseFloat(row.bgmAmount || row['BGM Amount'] || '0'),
       managementAmount: parseFloat(row.managementAmount || row['Management Amount'] || '0'),
@@ -689,6 +703,7 @@ export class AttendanceVerificationService {
       'Payment Date': row.paymentDate,
       'Package Price': row.packagePrice,
       'Session Price': row.sessionPrice,
+      'Discounted Session Price': row.discountedSessionPrice,
       'Coach Amount': row.coachAmount,
       'BGM Amount': row.bgmAmount,
       'Management Amount': row.managementAmount,
@@ -844,6 +859,8 @@ export class AttendanceVerificationService {
     if (invoiceToDiscount.size === 0) return master;
 
     // Update master rows by invoice number and recalc monetary fields
+    // NOTE: Package Price and Session Price should NOT be discounted - they represent the original rule values
+    // Only Discounted Session Price and amounts should be recalculated
     const updated = master.map(r => {
       const inv = String(r.invoiceNumber || '').trim();
       if (!inv) return r;
@@ -855,8 +872,11 @@ export class AttendanceVerificationService {
         discount: found.name,
         discountPercentage: found.pct,
         amount: this.round2((r.amount || 0) * factor),
-        packagePrice: this.round2((r.packagePrice || 0) * factor),
-        sessionPrice: this.round2((r.sessionPrice || 0) * factor),
+        // Keep original Package Price and Session Price from rules - do NOT apply discounts
+        packagePrice: r.packagePrice, // Keep original rule price
+        sessionPrice: r.sessionPrice, // Keep original rule unit_price
+        // Recalculate discounted session price and amounts
+        discountedSessionPrice: this.round2((r.sessionPrice || 0) * factor),
         coachAmount: this.round2((r.coachAmount || 0) * factor),
         bgmAmount: this.round2((r.bgmAmount || 0) * factor),
         managementAmount: this.round2((r.managementAmount || 0) * factor),
