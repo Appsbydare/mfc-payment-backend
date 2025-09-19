@@ -88,6 +88,7 @@ export class AttendanceVerificationService {
     fromDate?: string;
     toDate?: string;
     forceReverify?: boolean;
+    clearExisting?: boolean;
   } = {}): Promise<VerificationResult> {
     try {
       console.log('🔍 Starting attendance verification process...');
@@ -100,6 +101,11 @@ export class AttendanceVerificationService {
       const filteredPayments = this.filterPaymentsByDate(payments, params.fromDate, params.toDate);
       
       console.log(`📊 Processing ${filteredAttendance.length} attendance records and ${filteredPayments.length} payment records`);
+      
+      // Clear existing data if requested
+      if (params.clearExisting) {
+        await this.clearMasterData();
+      }
       
       // Load existing master data
       const existingMaster = await this.loadExistingMasterData();
@@ -170,6 +176,20 @@ export class AttendanceVerificationService {
     } catch (error) {
       console.log('📝 No existing master data found, starting fresh');
       return [];
+    }
+  }
+
+  /**
+   * Clear all master data from Google Sheets
+   */
+  async clearMasterData(): Promise<void> {
+    try {
+      console.log('🗑️ Clearing all master verification data...');
+      await googleSheetsService.writeSheet(this.MASTER_SHEET, []);
+      console.log('✅ Master verification data cleared successfully');
+    } catch (error) {
+      console.error('❌ Error clearing master data:', error);
+      throw new Error(`Failed to clear master data: ${(error as any)?.message || 'Unknown error'}`);
     }
   }
 
@@ -604,6 +624,17 @@ export class AttendanceVerificationService {
    * Normalize master row data from Google Sheets
    */
   private normalizeMasterRow(row: any): AttendanceVerificationMasterRow {
+    const sessionPrice = parseFloat(row.sessionPrice || row['Session Price'] || '0');
+    const discountPercentage = parseFloat(row.discountPercentage || row['Discount %'] || '0');
+    
+    // Calculate discounted session price if it's missing (for backward compatibility)
+    let discountedSessionPrice = parseFloat(row.discountedSessionPrice || row['Discounted Session Price'] || '0');
+    if (discountedSessionPrice === 0 && sessionPrice > 0) {
+      // Calculate discounted session price from original session price and discount
+      const factor = 1 - (discountPercentage / 100);
+      discountedSessionPrice = this.round2(sessionPrice * factor);
+    }
+    
     return {
       customerName: row.customerName || row['Customer Name'] || '',
       eventStartsAt: row.eventStartsAt || row['Event Starts At'] || '',
@@ -611,14 +642,14 @@ export class AttendanceVerificationService {
       instructors: row.instructors || row['Instructors'] || '',
       status: row.status || row['Status'] || '',
       discount: row.discount || row['Discount'] || '',
-      discountPercentage: parseFloat(row.discountPercentage || row['Discount %'] || '0'),
+      discountPercentage,
       verificationStatus: row.verificationStatus || row['Verification Status'] || 'Not Verified',
       invoiceNumber: row.invoiceNumber || row['Invoice #'] || '',
       amount: parseFloat(row.amount || row['Amount'] || '0'),
       paymentDate: row.paymentDate || row['Payment Date'] || '',
       packagePrice: parseFloat(row.packagePrice || row['Package Price'] || '0'),
-      sessionPrice: parseFloat(row.sessionPrice || row['Session Price'] || '0'),
-      discountedSessionPrice: parseFloat(row.discountedSessionPrice || row['Discounted Session Price'] || '0'),
+      sessionPrice,
+      discountedSessionPrice,
       coachAmount: parseFloat(row.coachAmount || row['Coach Amount'] || '0'),
       bgmAmount: parseFloat(row.bgmAmount || row['BGM Amount'] || '0'),
       managementAmount: parseFloat(row.managementAmount || row['Management Amount'] || '0'),

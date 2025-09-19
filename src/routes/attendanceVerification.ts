@@ -39,7 +39,7 @@ router.get('/master', async (req, res) => {
  */
 router.post('/verify', async (req, res) => {
   try {
-    const { fromDate, toDate, forceReverify = true } = req.body; // default to true to recompute all
+    const { fromDate, toDate, forceReverify = true, clearExisting = false } = req.body; // default to true to recompute all
     
     console.log('🔄 Starting verification process...');
     
@@ -78,7 +78,8 @@ router.post('/verify', async (req, res) => {
     const result = await attendanceVerificationService.verifyAttendanceData({
       fromDate,
       toDate,
-      forceReverify
+      forceReverify,
+      clearExisting
     });
     
     console.log(`✅ Verification complete: ${result.summary.newRecordsAdded || 0} new records added`);
@@ -345,6 +346,28 @@ router.get('/health', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Health check failed'
+    });
+  }
+});
+
+/**
+ * @desc    Clear all master verification data
+ * @route   DELETE /api/attendance-verification/master
+ * @access  Private
+ */
+router.delete('/master', async (req, res) => {
+  try {
+    await attendanceVerificationService.clearMasterData();
+    
+    res.json({
+      success: true,
+      message: 'Master verification data cleared successfully'
+    });
+  } catch (error: any) {
+    console.error('Error clearing master verification data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to clear verification data'
     });
   }
 });
