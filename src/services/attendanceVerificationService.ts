@@ -233,7 +233,7 @@ export class AttendanceVerificationService {
     const status = this.getField(attendance as any, ['Status']) || '';
     
     // Find matching payment record
-    const matchingPayment = this.findMatchingPayment(attendance, payments);
+    const matchingPayment = this.findMatchingPayment(attendance, payments, rules);
     
     // Determine verification status
     const verificationStatus = matchingPayment ? 'Verified' : 'Not Verified';
@@ -284,7 +284,7 @@ export class AttendanceVerificationService {
   /**
    * Find matching payment record for attendance
    */
-  private findMatchingPayment(attendance: AttendanceRecord, payments: PaymentRecord[]): PaymentRecord | null {
+  private findMatchingPayment(attendance: AttendanceRecord, payments: PaymentRecord[], rules: any[] = []): PaymentRecord | null {
     const customerName = this.normalizeCustomerName(attendance.Customer);
     const membershipName = this.normalizeMembershipName(attendance['Membership Name']);
     const attendanceDate = this.parseDate(attendance['Event Starts At'] || attendance.Date || '');
@@ -294,13 +294,46 @@ export class AttendanceVerificationService {
     let best: { p: PaymentRecord; score: number } | null = null;
     const memTokens = this.tokenize(membershipName);
 
+    // Get potential payment_memo_aliases from rules for this membership
+    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
+    const relevantRules = rules.filter(r => r.session_type === sessionType);
+    const paymentAliases = relevantRules
+      .map(r => String(r.payment_memo_alias || '').trim())
+      .filter(alias => alias.length > 0);
+
     for (const p of customerPayments) {
       const pd = this.parseDate(p.Date);
       if (!pd) continue;
       const sameDay = this.isSameDate(attendanceDate, pd) ? 1 : 0;
       const within7 = this.isWithinDays(attendanceDate, pd, 7) ? 0.7 : 0;
       const memo = String(p.Memo || '');
-      const textScore = this.fuzzyContains(membershipName, memo) ? 1 : this.jaccard(memTokens, this.tokenize(memo));
+      
+      let textScore = 0;
+      
+      // First, try exact matching with payment_memo_alias
+      for (const alias of paymentAliases) {
+        if (this.canonicalize(alias) === this.canonicalize(memo)) {
+          textScore = 2.0; // Highest score for exact alias match
+          break;
+        }
+      }
+      
+      // If no exact alias match, try fuzzy matching
+      if (textScore === 0) {
+        // Try fuzzy matching with payment_memo_alias first
+        for (const alias of paymentAliases) {
+          if (this.fuzzyContains(alias, memo)) {
+            textScore = 1.8; // High score for fuzzy alias match
+            break;
+          }
+        }
+        
+        // Fallback to membership name matching
+        if (textScore === 0) {
+          textScore = this.fuzzyContains(membershipName, memo) ? 1.5 : this.jaccard(memTokens, this.tokenize(memo));
+        }
+      }
+      
       const score = Math.max(sameDay, within7) + textScore;
       if (!best || score > best.score) best = { p, score };
     }
@@ -335,12 +368,22 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Calculate session price based on payment amount and discount
+   * Calculate session price based on rule unit_price and discount
    */
   private calculateSessionPrice(params: { baseAmount: number; rule: any; discountInfo: any }): number {
-    const { baseAmount, rule, discountInfo } = params;
-    // Start from rule price if available, otherwise the observed base amount
-    let price = (rule && typeof rule.price === 'number' && rule.price > 0) ? Number(rule.price) : Number(baseAmount || 0);
+    const { rule, discountInfo } = params;
+    
+    // Use rule's unit_price (per-session price) as the base, not the payment amount
+    let price = 0;
+    if (rule && typeof rule.unit_price === 'number' && rule.unit_price > 0) {
+      price = Number(rule.unit_price);
+    } else if (rule && typeof rule.price === 'number' && rule.sessions && rule.sessions > 0) {
+      // Fallback: calculate unit price from total price and sessions
+      price = Number(rule.price) / Number(rule.sessions);
+    } else {
+      // Last resort: use payment amount (but this should be avoided)
+      price = Number(params.baseAmount || 0);
+    }
     
     if (!discountInfo) return price;
     const pct = Number(discountInfo.applicable_percentage || 0);
@@ -393,19 +436,58 @@ export class AttendanceVerificationService {
     if (!rules || rules.length === 0) return null;
     const canonMembership = this.canonicalize(membershipName);
 
-    // Score rules by alias/package similarity
+    // First, try exact matching with attendance_alias
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      if (attendanceAlias && this.canonicalize(attendanceAlias) === this.canonicalize(membershipName)) {
+        console.log(`✅ Exact match found: "${attendanceAlias}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
+    // Second, try fuzzy matching with attendance_alias (higher priority)
     let best: { r: any; score: number } | null = null;
     const memTokens = this.tokenize(canonMembership);
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
-      const alias = r.attendance_alias || r.package_name || '';
-      const score = this.fuzzyContains(alias, membershipName) ? 1.5 : this.jaccard(memTokens, this.tokenize(alias));
-      if (!best || score > best.score) best = { r, score };
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      const packageName = String(r.package_name || '').trim();
+      
+      let score = 0;
+      if (attendanceAlias) {
+        // Higher priority for attendance_alias matches
+        if (this.fuzzyContains(attendanceAlias, membershipName)) {
+          score = 2.0; // Highest score for attendance_alias fuzzy match
+        } else {
+          score = this.jaccard(memTokens, this.tokenize(attendanceAlias)) * 1.5; // Boost attendance_alias
+        }
+      } else if (packageName) {
+        // Lower priority for package_name matches
+        if (this.fuzzyContains(packageName, membershipName)) {
+          score = 1.5;
+        } else {
+          score = this.jaccard(memTokens, this.tokenize(packageName));
+        }
+      }
+      
+      if (score > 0 && (!best || score > best.score)) {
+        best = { r, score };
+      }
     }
-    if (best && best.score >= 0.5) return best.r;
+    
+    if (best && best.score >= 0.5) {
+      console.log(`✅ Fuzzy match found: score ${best.score.toFixed(2)} for "${membershipName}"`);
+      return best.r;
+    }
 
     // Fallback default rule for session type
     const def = rules.find(r => (!r.package_name || r.package_name === '') && r.session_type === sessionType);
+    if (def) {
+      console.log(`⚠️ Using default rule for session type: ${sessionType}`);
+    } else {
+      console.log(`❌ No rule found for "${membershipName}" (${sessionType})`);
+    }
     return def || null;
   }
 
