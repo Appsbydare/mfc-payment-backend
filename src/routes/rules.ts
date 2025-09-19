@@ -46,6 +46,9 @@ const normalizeRule = (r: any) => ({
   is_fixed_rate: String(r.is_fixed_rate || r.fixed || '').trim(),
   allow_discounts: String(r.allow_discounts || r.allowDiscounts || '').trim(),
   notes: String(r.notes || '').trim(),
+  // Alias fields for exact matching in verification
+  attendance_alias: String(r.attendance_alias || r.attendanceAlias || '').trim(),
+  payment_memo_alias: String(r.payment_memo_alias || r.paymentMemoAlias || '').trim(),
   created_at: r.created_at || new Date().toISOString(),
   updated_at: new Date().toISOString(),
 });
