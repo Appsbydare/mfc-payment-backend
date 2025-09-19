@@ -20,6 +20,7 @@ export interface AttendanceVerificationMasterRow {
   paymentDate: string;
   
   // Calculated fields based on Rules + Discount information
+  packagePrice: number; // From rules sheet column E (price)
   sessionPrice: number;
   coachAmount: number;
   bgmAmount: number;
@@ -290,6 +291,10 @@ export class AttendanceVerificationService {
     console.log(`💰 Session Price calculated: ${sessionPrice} (from rule: ${rule?.unit_price || 'N/A'}, payment: ${amount})`);
     const amounts = this.calculateAmounts(sessionPrice, rule, sessionType);
     
+    // Get package price from rule (column E)
+    const packagePrice = rule ? this.round2(Number(rule.price || 0)) : 0;
+    console.log(`📦 Package Price: ${packagePrice} (from rule: ${rule?.price || 'N/A'})`);
+    
     // Generate unique key
     const uniqueKey = this.generateUniqueKey(attendance);
     
@@ -305,6 +310,7 @@ export class AttendanceVerificationService {
       invoiceNumber,
       amount,
       paymentDate,
+      packagePrice,
       sessionPrice,
       coachAmount: this.round2(amounts.coach),
       bgmAmount: this.round2(amounts.bgm),
@@ -465,6 +471,7 @@ export class AttendanceVerificationService {
 
   /**
    * Find matching rule for membership and session type
+   * Priority: attendance_alias (column W) > package_name > fuzzy matching
    */
   private findMatchingRule(membershipName: string, sessionType: string, rules: any[]): any | null {
     if (!rules || rules.length === 0) return null;
@@ -476,26 +483,27 @@ export class AttendanceVerificationService {
       rule_name: r.rule_name,
       package_name: r.package_name,
       attendance_alias: r.attendance_alias,
-      unit_price: r.unit_price
+      unit_price: r.unit_price,
+      price: r.price
     })));
 
-    // First, try exact matching with package_name (since attendance_alias might be empty)
-    for (const r of rules) {
-      if (r.session_type !== sessionType) continue;
-      const packageName = String(r.package_name || '').trim();
-      if (packageName && this.canonicalize(packageName) === this.canonicalize(membershipName)) {
-        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
-        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
-        return r;
-      }
-    }
-
-    // Second, try exact matching with attendance_alias (column W) - if populated
+    // First, try exact matching with attendance_alias (column W) - PRIMARY MATCHING FIELD
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
       const attendanceAlias = String(r.attendance_alias || '').trim();
       if (attendanceAlias && this.canonicalize(attendanceAlias) === this.canonicalize(membershipName)) {
         console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
+        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
+        return r;
+      }
+    }
+
+    // Second, try exact matching with package_name (fallback)
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const packageName = String(r.package_name || '').trim();
+      if (packageName && this.canonicalize(packageName) === this.canonicalize(membershipName)) {
+        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
         console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
         return r;
       }
@@ -549,7 +557,8 @@ export class AttendanceVerificationService {
         rule_name: r.rule_name,
         package_name: r.package_name,
         session_type: r.session_type,
-        unit_price: r.unit_price
+        unit_price: r.unit_price,
+        price: r.price
       })));
     }
     return def || null;
@@ -594,6 +603,7 @@ export class AttendanceVerificationService {
       invoiceNumber: row.invoiceNumber || row['Invoice #'] || '',
       amount: parseFloat(row.amount || row['Amount'] || '0'),
       paymentDate: row.paymentDate || row['Payment Date'] || '',
+      packagePrice: parseFloat(row.packagePrice || row['Package Price'] || '0'),
       sessionPrice: parseFloat(row.sessionPrice || row['Session Price'] || '0'),
       coachAmount: parseFloat(row.coachAmount || row['Coach Amount'] || '0'),
       bgmAmount: parseFloat(row.bgmAmount || row['BGM Amount'] || '0'),
@@ -677,6 +687,7 @@ export class AttendanceVerificationService {
       'Invoice #': row.invoiceNumber,
       'Amount': row.amount,
       'Payment Date': row.paymentDate,
+      'Package Price': row.packagePrice,
       'Session Price': row.sessionPrice,
       'Coach Amount': row.coachAmount,
       'BGM Amount': row.bgmAmount,
@@ -844,6 +855,7 @@ export class AttendanceVerificationService {
         discount: found.name,
         discountPercentage: found.pct,
         amount: this.round2((r.amount || 0) * factor),
+        packagePrice: this.round2((r.packagePrice || 0) * factor),
         sessionPrice: this.round2((r.sessionPrice || 0) * factor),
         coachAmount: this.round2((r.coachAmount || 0) * factor),
         bgmAmount: this.round2((r.bgmAmount || 0) * factor),
