@@ -189,7 +189,7 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Ensure rules contain alias columns for standardized matching.
+   * Ensure rules contain alias columns and unit_price for standardized matching.
    * Adds columns if missing and persists back to Google Sheets once.
    */
   private async ensureRuleAliasColumns(rules: any[]): Promise<any[]> {
@@ -197,20 +197,29 @@ export class AttendanceVerificationService {
     const sample = rules[0] || {};
     const hasAttendanceAlias = 'attendance_alias' in sample || 'attendance_membership' in sample || 'attendance_name' in sample;
     const hasMemoAlias = 'payment_memo_alias' in sample || 'memo_alias' in sample || 'memo_pattern' in sample;
-    if (hasAttendanceAlias && hasMemoAlias) return rules;
+    const hasUnitPrice = 'unit_price' in sample;
+    
+    if (hasAttendanceAlias && hasMemoAlias && hasUnitPrice) return rules;
 
-    // Extend objects with empty aliases (default to package_name to bootstrap)
-    const extended = rules.map((r: any) => ({
-      ...r,
-      attendance_alias: r.attendance_alias ?? r.attendance_membership ?? r.attendance_name ?? (r.package_name || ''),
-      payment_memo_alias: r.payment_memo_alias ?? r.memo_alias ?? r.memo_pattern ?? (r.package_name || ''),
-    }));
+    // Extend objects with empty aliases and calculated unit_price
+    const extended = rules.map((r: any) => {
+      const price = parseFloat(String(r.price || '0')) || 0;
+      const sessions = parseFloat(String(r.sessions || r.sessions_per_pack || '1')) || 1;
+      const unitPrice = r.unit_price || (price > 0 && sessions > 0 ? price / sessions : 0);
+      
+      return {
+        ...r,
+        attendance_alias: r.attendance_alias ?? r.attendance_membership ?? r.attendance_name ?? (r.package_name || ''),
+        payment_memo_alias: r.payment_memo_alias ?? r.memo_alias ?? r.memo_pattern ?? (r.package_name || ''),
+        unit_price: unitPrice,
+      };
+    });
 
     try {
       await googleSheetsService.writeSheet(this.RULES_SHEET, extended);
-      console.log('✅ Ensured rules alias columns (attendance_alias, payment_memo_alias)');
+      console.log('✅ Ensured rules columns (attendance_alias, payment_memo_alias, unit_price)');
     } catch (e) {
-      console.warn('Could not persist alias columns to rules sheet:', (e as any)?.message || e);
+      console.warn('Could not persist rule columns to rules sheet:', (e as any)?.message || e);
     }
     return extended;
   }
@@ -247,12 +256,24 @@ export class AttendanceVerificationService {
     const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
     const rule = this.findMatchingRule(membershipName, sessionType, rules);
     
+    // Debug logging
+    console.log(`🔍 Processing: ${membershipName} (${sessionType})`);
+    console.log(`📋 Rule found:`, rule ? {
+      id: rule.id,
+      rule_name: rule.rule_name,
+      unit_price: rule.unit_price,
+      price: rule.price,
+      sessions: rule.sessions,
+      attendance_alias: rule.attendance_alias
+    } : 'No rule found');
+    
     // Find applicable discount AFTER rule lookup
     const discountInfo = await this.findApplicableDiscount(matchingPayment, discounts);
     const discount = discountInfo?.name || '';
     const discountPercentage = discountInfo?.applicable_percentage || 0;
     
     const sessionPrice = this.round2(this.calculateSessionPrice({ baseAmount: amount, rule, discountInfo }));
+    console.log(`💰 Session Price calculated: ${sessionPrice} (from rule: ${rule?.unit_price || 'N/A'}, payment: ${amount})`);
     const amounts = this.calculateAmounts(sessionPrice, rule, sessionType);
     
     // Generate unique key
