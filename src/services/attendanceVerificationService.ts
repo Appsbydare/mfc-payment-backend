@@ -472,18 +472,7 @@ export class AttendanceVerificationService {
 
     console.log(`🔍 Looking for rule: "${membershipName}" (${sessionType})`);
 
-    // First, try exact matching with package_name (highest priority)
-    for (const r of rules) {
-      if (r.session_type !== sessionType) continue;
-      const packageName = String(r.package_name || '').trim();
-      if (packageName && this.canonicalize(packageName) === this.canonicalize(membershipName)) {
-        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
-        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
-        return r;
-      }
-    }
-
-    // Second, try exact matching with attendance_alias
+    // First, try exact matching with attendance_alias (column W) - HIGHEST PRIORITY
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
       const attendanceAlias = String(r.attendance_alias || '').trim();
@@ -494,28 +483,39 @@ export class AttendanceVerificationService {
       }
     }
 
-    // Third, try fuzzy matching with package_name (higher priority than attendance_alias)
+    // Second, try exact matching with package_name (fallback)
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const packageName = String(r.package_name || '').trim();
+      if (packageName && this.canonicalize(packageName) === this.canonicalize(membershipName)) {
+        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
+        return r;
+      }
+    }
+
+    // Third, try fuzzy matching with attendance_alias (higher priority than package_name)
     let best: { r: any; score: number } | null = null;
     const memTokens = this.tokenize(canonMembership);
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
-      const packageName = String(r.package_name || '').trim();
       const attendanceAlias = String(r.attendance_alias || '').trim();
+      const packageName = String(r.package_name || '').trim();
       
       let score = 0;
-      if (packageName) {
-        // Higher priority for package_name matches
-        if (this.fuzzyContains(packageName, membershipName)) {
-          score = 2.0; // Highest score for package_name fuzzy match
-        } else {
-          score = this.jaccard(memTokens, this.tokenize(packageName)) * 1.5; // Boost package_name
-        }
-      } else if (attendanceAlias) {
-        // Lower priority for attendance_alias matches
+      if (attendanceAlias) {
+        // Higher priority for attendance_alias matches
         if (this.fuzzyContains(attendanceAlias, membershipName)) {
+          score = 2.0; // Highest score for attendance_alias fuzzy match
+        } else {
+          score = this.jaccard(memTokens, this.tokenize(attendanceAlias)) * 1.5; // Boost attendance_alias
+        }
+      } else if (packageName) {
+        // Lower priority for package_name matches
+        if (this.fuzzyContains(packageName, membershipName)) {
           score = 1.5;
         } else {
-          score = this.jaccard(memTokens, this.tokenize(attendanceAlias));
+          score = this.jaccard(memTokens, this.tokenize(packageName));
         }
       }
       
