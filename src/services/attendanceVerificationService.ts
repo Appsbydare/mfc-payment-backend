@@ -107,9 +107,11 @@ export class AttendanceVerificationService {
         await this.clearMasterData();
       }
       
-      // Load existing master data
+      // Load existing master data (TEMPORARILY DISABLED)
       const existingMaster = await this.loadExistingMasterData();
       const existingKeys = new Set(existingMaster.map(row => row.uniqueKey));
+      
+      console.log(`🔄 Starting fresh processing - existing records: ${existingMaster.length}, existing keys: ${existingKeys.size}`);
       
       // Build a map of existing rows by uniqueKey to avoid duplicates
       const existingByKey = new Map(existingMaster.map(r => [r.uniqueKey, r] as const));
@@ -168,11 +170,17 @@ export class AttendanceVerificationService {
 
   /**
    * Load existing master data from Google Sheets
+   * TEMPORARILY DISABLED - Processing from scratch using raw data
    */
   async loadExistingMasterData(): Promise<AttendanceVerificationMasterRow[]> {
     try {
-      const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
-      return data.map(row => this.normalizeMasterRow(row));
+      // TEMPORARILY DISABLED - Always return empty array to process from scratch
+      console.log('🚫 TEMPORARILY DISABLED: Loading existing master data - processing from scratch');
+      return [];
+      
+      // Original code (commented out temporarily):
+      // const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
+      // return data.map(row => this.normalizeMasterRow(row));
     } catch (error) {
       console.log('📝 No existing master data found, starting fresh');
       return [];
@@ -304,6 +312,12 @@ export class AttendanceVerificationService {
       sessions: rule.sessions
     } : 'No rule found');
     
+    // Log verification status and payment info
+    console.log(`💳 Payment match: ${matchingPayment ? 'FOUND' : 'NOT FOUND'}`);
+    if (matchingPayment) {
+      console.log(`💰 Payment details: Invoice=${matchingPayment.Invoice}, Amount=${matchingPayment.Amount}, Date=${matchingPayment.Date}`);
+    }
+    
     // Find applicable discount AFTER rule lookup
     const discountInfo = await this.findApplicableDiscount(matchingPayment, discounts);
     const discount = discountInfo?.name || '';
@@ -323,6 +337,9 @@ export class AttendanceVerificationService {
     // Get package price from rule (column E)
     const packagePrice = rule ? this.round2(Number(rule.price || 0)) : 0;
     console.log(`📦 Package Price: ${packagePrice} (from rule: ${rule?.price || 'N/A'})`);
+    
+    // Log final calculated values
+    console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Discounted Session Price=${discountedSessionPrice}, Verification Status=${verificationStatus}`);
     
     // Generate unique key
     const uniqueKey = this.generateUniqueKey(attendance);
