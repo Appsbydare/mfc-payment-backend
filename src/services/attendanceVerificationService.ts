@@ -471,24 +471,31 @@ export class AttendanceVerificationService {
     const canonMembership = this.canonicalize(membershipName);
 
     console.log(`🔍 Looking for rule: "${membershipName}" (${sessionType})`);
+    console.log(`📋 Available rules for ${sessionType}:`, rules.filter(r => r.session_type === sessionType).map(r => ({
+      id: r.id,
+      rule_name: r.rule_name,
+      package_name: r.package_name,
+      attendance_alias: r.attendance_alias,
+      unit_price: r.unit_price
+    })));
 
-    // First, try exact matching with attendance_alias (column W) - HIGHEST PRIORITY
-    for (const r of rules) {
-      if (r.session_type !== sessionType) continue;
-      const attendanceAlias = String(r.attendance_alias || '').trim();
-      if (attendanceAlias && this.canonicalize(attendanceAlias) === this.canonicalize(membershipName)) {
-        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
-        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
-        return r;
-      }
-    }
-
-    // Second, try exact matching with package_name (fallback)
+    // First, try exact matching with package_name (since attendance_alias might be empty)
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
       const packageName = String(r.package_name || '').trim();
       if (packageName && this.canonicalize(packageName) === this.canonicalize(membershipName)) {
         console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+        console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
+        return r;
+      }
+    }
+
+    // Second, try exact matching with attendance_alias (column W) - if populated
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      if (attendanceAlias && this.canonicalize(attendanceAlias) === this.canonicalize(membershipName)) {
+        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
         console.log(`📊 Rule details: unit_price=${r.unit_price}, price=${r.price}, sessions=${r.sessions}`);
         return r;
       }
@@ -534,8 +541,16 @@ export class AttendanceVerificationService {
     const def = rules.find(r => (!r.package_name || r.package_name === '') && r.session_type === sessionType);
     if (def) {
       console.log(`⚠️ Using default rule for session type: ${sessionType}`);
+      console.log(`📊 Default rule details: unit_price=${def.unit_price}, price=${def.price}, sessions=${def.sessions}`);
     } else {
       console.log(`❌ No rule found for "${membershipName}" (${sessionType})`);
+      console.log(`🔍 All available rules:`, rules.map(r => ({
+        id: r.id,
+        rule_name: r.rule_name,
+        package_name: r.package_name,
+        session_type: r.session_type,
+        unit_price: r.unit_price
+      })));
     }
     return def || null;
   }
