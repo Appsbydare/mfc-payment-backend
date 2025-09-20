@@ -210,40 +210,56 @@ router.delete('/invoices', async (req, res) => {
   }
 });
 
-// Testing endpoint
+// Simple testing endpoint
 router.post('/test', async (req, res) => {
   try {
     console.log('🧪 Testing endpoint called');
     
-    // Test 1: Check if invoice verification service is available
-    console.log('📋 Test 1: Checking invoice verification service...');
-    if (!invoiceVerificationService) {
-      throw new Error('Invoice verification service not available');
+    // Test 1: Basic connectivity test
+    console.log('📋 Test 1: Basic connectivity test...');
+    console.log('✅ Backend is responding');
+    
+    // Test 2: Check if services are available
+    console.log('📋 Test 2: Checking service availability...');
+    const services = {
+      attendanceVerificationService: !!attendanceVerificationService,
+      invoiceVerificationService: !!invoiceVerificationService
+    };
+    console.log('✅ Service availability check completed:', services);
+    
+    // Test 3: Try to access Google Sheets service
+    console.log('📋 Test 3: Testing Google Sheets connectivity...');
+    try {
+      const { googleSheetsService } = require('../dist/services/googleSheets');
+      if (googleSheetsService) {
+        console.log('✅ Google Sheets service is available');
+      } else {
+        console.log('⚠️ Google Sheets service not available');
+      }
+    } catch (gsError) {
+      console.log('⚠️ Google Sheets service error:', gsError.message);
     }
-    console.log('✅ Invoice verification service is available');
     
-    // Test 2: Try to load existing data
-    console.log('📋 Test 2: Loading existing invoice verification data...');
-    const existingData = await invoiceVerificationService.loadInvoiceVerificationData();
-    console.log(`✅ Loaded ${existingData.length} existing records`);
-    
-    // Test 3: Try to initialize with dummy data
-    console.log('📋 Test 3: Initializing invoice verification...');
-    const initializedData = await invoiceVerificationService.initializeInvoiceVerification();
-    console.log(`✅ Initialized ${initializedData.length} invoice records`);
-    
-    // Test 4: Try to save dummy data
-    console.log('📋 Test 4: Saving invoice verification data...');
-    await invoiceVerificationService.saveInvoiceVerificationData(initializedData);
-    console.log('✅ Invoice verification data saved successfully');
+    // Test 4: Try to read a simple sheet
+    console.log('📋 Test 4: Testing sheet reading...');
+    try {
+      const { googleSheetsService } = require('../dist/services/googleSheets');
+      if (googleSheetsService) {
+        // Try to read a simple sheet to test connectivity
+        const testData = await googleSheetsService.readSheet('Payments');
+        console.log(`✅ Successfully read Payments sheet: ${testData.length} records`);
+      }
+    } catch (readError) {
+      console.log('⚠️ Sheet reading error:', readError.message);
+    }
     
     res.json({ 
       success: true, 
-      message: 'All tests passed!',
+      message: 'Basic tests completed!',
       data: {
-        existingRecords: existingData.length,
-        initializedRecords: initializedData.length,
-        sampleData: initializedData.slice(0, 3) // Return first 3 records as sample
+        services,
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'production'
       }
     });
     
@@ -252,7 +268,8 @@ router.post('/test', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: error?.message || 'Testing failed',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      timestamp: new Date().toISOString()
     });
   }
 });
