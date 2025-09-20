@@ -253,13 +253,65 @@ router.post('/test', async (req, res) => {
       console.log('⚠️ Sheet reading error:', readError.message);
     }
     
+    // Test 5: Try to write dummy data to Inv_Verification sheet
+    console.log('📋 Test 5: Testing sheet writing with dummy data...');
+    try {
+      const { googleSheetsService } = require('../dist/services/googleSheets');
+      if (googleSheetsService) {
+        // Create dummy invoice verification data
+        const dummyData = [{
+          'Invoice Number': 'TEST-001',
+          'Customer Name': 'Test Customer',
+          'Total Amount': 100.00,
+          'Used Amount': 0.00,
+          'Remaining Balance': 100.00,
+          'Status': 'Available',
+          'Sessions Used': 0,
+          'Total Sessions': 0,
+          'Last Used Date': '',
+          'Created At': new Date().toISOString(),
+          'Updated At': new Date().toISOString()
+        }];
+        
+        // Try to write dummy data
+        await googleSheetsService.writeSheet('Inv_Verification', dummyData);
+        console.log('✅ Successfully wrote dummy data to Inv_Verification sheet');
+      }
+    } catch (writeError) {
+      console.log('⚠️ Sheet writing error:', writeError.message);
+    }
+    
+    // Test 6: Try to use the invoice verification service
+    console.log('📋 Test 6: Testing invoice verification service...');
+    try {
+      if (invoiceVerificationService) {
+        // Try to initialize invoice verification
+        const initResult = await invoiceVerificationService.initializeInvoiceVerification();
+        console.log(`✅ Invoice verification service initialized: ${initResult.length} records`);
+        
+        // Try to save the data
+        await invoiceVerificationService.saveInvoiceVerificationData(initResult);
+        console.log('✅ Invoice verification data saved successfully');
+      }
+    } catch (ivError) {
+      console.log('⚠️ Invoice verification service error:', ivError.message);
+    }
+    
     res.json({ 
       success: true, 
-      message: 'Basic tests completed!',
+      message: 'All tests completed!',
       data: {
         services,
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'production'
+        environment: process.env.NODE_ENV || 'production',
+        testsCompleted: [
+          'Basic connectivity',
+          'Service availability',
+          'Google Sheets connectivity',
+          'Sheet reading',
+          'Sheet writing',
+          'Invoice verification service'
+        ]
       }
     });
     
