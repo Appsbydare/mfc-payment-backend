@@ -1628,6 +1628,56 @@ export class AttendanceVerificationService {
           console.log(`✅ PARTIAL discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
           break;
         }
+
+        // Try keyword matching for common discount patterns
+        const memoWords = memo.toLowerCase().split(/\s+/);
+        const discountWords = discountName.toLowerCase().split(/\s+/);
+        
+        // Check if any significant words from discount name appear in memo
+        const significantWords = discountWords.filter(word => 
+          word.length > 2 && 
+          !['the', 'and', 'or', 'for', 'with', 'discount', 'pass', 'plan'].includes(word)
+        );
+        
+        if (significantWords.length > 0 && 
+            significantWords.every(word => memoWords.some(memoWord => 
+              memoWord.includes(word) || word.includes(memoWord)
+            ))) {
+          matchingDiscount = discount;
+          console.log(`✅ KEYWORD discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+          break;
+        }
+
+        // Special pattern matching for common cases
+        if (memo.toLowerCase().includes('loyalty') && discountName.toLowerCase().includes('loyalty')) {
+          matchingDiscount = discount;
+          console.log(`✅ LOYALTY pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+          break;
+        }
+        
+        if (memo.toLowerCase().includes('mindbody') && discountName.toLowerCase().includes('mindbody')) {
+          matchingDiscount = discount;
+          console.log(`✅ MINDBODY pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+          break;
+        }
+        
+        if (memo.toLowerCase().includes('freedom') && discountName.toLowerCase().includes('freedom')) {
+          matchingDiscount = discount;
+          console.log(`✅ FREEDOM pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+          break;
+        }
+        
+        if (memo.toLowerCase().includes('staff') && discountName.toLowerCase().includes('staff')) {
+          matchingDiscount = discount;
+          console.log(`✅ STAFF pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+          break;
+        }
+        
+        if (memo.toLowerCase().includes('boxing') && discountName.toLowerCase().includes('boxing')) {
+          matchingDiscount = discount;
+          console.log(`✅ BOXING pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+          break;
+        }
       }
 
       if (!matchingDiscount) {

@@ -301,6 +301,62 @@ router.post('/recalculate-discounts', async (req, res) => {
   }
 });
 
+// Test discount functionality without Google Sheets
+router.post('/test-discounts', async (req, res) => {
+  try {
+    console.log('🧪 Testing discount functionality...');
+    
+    // Mock data for testing
+    const mockDiscounts = [
+      { name: 'MindBody Switch', active: true, applicable_percentage: 10 },
+      { name: 'Freedom Pass', active: true, applicable_percentage: 15 },
+      { name: 'Staff Discount', active: true, applicable_percentage: 20 },
+      { name: '10 EURO DISCOUNT', active: true, applicable_percentage: 10 },
+      { name: 'BOXING DISCOUNT', active: true, applicable_percentage: 25 }
+    ];
+    
+    const mockPayments = [
+      { Invoice: 'INV001', Memo: 'MindBody Switch', Amount: 100 },
+      { Invoice: 'INV002', Memo: 'Freedom Pass', Amount: 150 },
+      { Invoice: 'INV003', Memo: 'Staff Discount', Amount: 200 },
+      { Invoice: 'INV004', Memo: '10 EURO DISCOUNT', Amount: 50 },
+      { Invoice: 'INV005', Memo: 'BOXING DISCOUNT', Amount: 80 }
+    ];
+    
+    const mockMasterData = [
+      { invoiceNumber: 'INV001', customerName: 'Test Customer 1', amount: 100 },
+      { invoiceNumber: 'INV002', customerName: 'Test Customer 2', amount: 150 },
+      { invoiceNumber: 'INV003', customerName: 'Test Customer 3', amount: 200 },
+      { invoiceNumber: 'INV004', customerName: 'Test Customer 4', amount: 50 },
+      { invoiceNumber: 'INV005', customerName: 'Test Customer 5', amount: 80 }
+    ];
+    
+    // Test the discount application logic
+    const result = await attendanceVerificationService['applyDiscountsToMasterData'](mockMasterData, mockDiscounts, mockPayments);
+    
+    const discountAppliedCount = result.filter(row => row.discountApplied).length;
+    
+    res.json({
+      success: true,
+      message: `Test completed: ${discountAppliedCount} discounts applied out of ${result.length} records`,
+      data: result,
+      summary: {
+        totalRecords: result.length,
+        discountAppliedCount: discountAppliedCount,
+        availableDiscounts: mockDiscounts.length,
+        testPayments: mockPayments.length
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Test discount error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed: ' + error.message
+    });
+  }
+});
+
 // Simple testing endpoint
 router.post('/test', async (req, res) => {
   try {
