@@ -412,9 +412,21 @@ export class AttendanceVerificationService {
         // Package cannot be found in rules
         console.log(`❌ Package cannot be found in rules: "${membershipName}" (${sessionType})`);
         verificationStatus = 'Package Cannot be found';
-        invoiceNumber = matchingPayment.Invoice;
-        amount = Number(matchingPayment.Amount || 0);
-        paymentDate = matchingPayment.Date;
+        
+        // Still use enhanced invoice selection even without rule
+        const invoiceResult = await this.useInvoiceForSession(
+          customerName,
+          Number(matchingPayment.Amount || 0), // Use payment amount as session price
+          attendance['Event Starts at'] || '',
+          invoiceVerifications,
+          payments,
+          rules
+        );
+        
+        updatedInvoices = invoiceResult.updatedInvoices;
+        invoiceNumber = invoiceResult.usedInvoiceNumber;
+        amount = invoiceResult.usedAmount;
+        paymentDate = invoiceResult.usedPaymentDate;
       } else {
         console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
         
@@ -746,7 +758,24 @@ export class AttendanceVerificationService {
     const bestInvoice = await this.findBestAvailableInvoice(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules);
     
     if (!bestInvoice) {
-      console.log(`❌ No available invoice found for customer ${customerName}`);
+      console.log(`❌ No available invoice found for customer ${customerName}, trying fallback approach`);
+      
+      // Fallback: Find any payment for this customer and use it
+      const normalizedCustomer = this.normalizeCustomerName(customerName);
+      const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === normalizedCustomer);
+      
+      if (customerPayments.length > 0) {
+        const fallbackPayment = customerPayments[0]; // Use first payment as fallback
+        console.log(`🔄 Using fallback payment: Invoice ${fallbackPayment.Invoice}`);
+        
+        return {
+          updatedInvoices: invoiceVerifications,
+          usedInvoiceNumber: fallbackPayment.Invoice,
+          usedAmount: Number(fallbackPayment.Amount || 0),
+          usedPaymentDate: fallbackPayment.Date
+        };
+      }
+      
       return {
         updatedInvoices: invoiceVerifications,
         usedInvoiceNumber: '',
@@ -814,18 +843,28 @@ export class AttendanceVerificationService {
     
     const normalizedCustomer = this.normalizeCustomerName(customerName);
     
+    console.log(`🔍 Finding best invoice for ${normalizedCustomer}, required amount: ${requiredAmount}`);
+    
     // First, ensure all customer payments are in verification data
     await this.ensureAllInvoicesInVerification(normalizedCustomer, invoiceVerifications, payments, rules);
     
-    // Find all invoices for this customer with sufficient balance
-    const availableInvoices = invoiceVerifications.filter(invoice => 
-      invoice.customerName === normalizedCustomer && 
+    // Find all invoices for this customer
+    const customerInvoices = invoiceVerifications.filter(invoice => 
+      invoice.customerName === normalizedCustomer
+    );
+    
+    console.log(`📊 Customer ${normalizedCustomer} has ${customerInvoices.length} invoices: ${customerInvoices.map(inv => `${inv.invoiceNumber}(${inv.remainingBalance}/${inv.totalAmount})`).join(', ')}`);
+    
+    // Find invoices with sufficient balance
+    const availableInvoices = customerInvoices.filter(invoice => 
       invoice.remainingBalance >= requiredAmount &&
       invoice.status !== 'Fully Used'
     );
     
+    console.log(`💰 Available invoices with sufficient balance (>=${requiredAmount}): ${availableInvoices.length}`);
+    
     if (availableInvoices.length === 0) {
-      console.log(`❌ No available invoices found for customer ${normalizedCustomer}`);
+      console.log(`❌ No available invoices found for customer ${normalizedCustomer} with sufficient balance`);
       return null;
     }
     
@@ -842,7 +881,7 @@ export class AttendanceVerificationService {
       return dateA.getTime() - dateB.getTime(); // Oldest first
     });
     
-    console.log(`📋 Available invoices for ${normalizedCustomer}: ${sortedInvoices.map(inv => `${inv.invoiceNumber}(${inv.remainingBalance})`).join(', ')}`);
+    console.log(`📋 Sorted available invoices for ${normalizedCustomer}: ${sortedInvoices.map(inv => `${inv.invoiceNumber}(${inv.remainingBalance})`).join(', ')}`);
     
     // Return the oldest available invoice (FIFO)
     const selectedInvoice = sortedInvoices[0];
