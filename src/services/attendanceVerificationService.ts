@@ -260,13 +260,11 @@ export class AttendanceVerificationService {
    */
   async loadExistingMasterData(): Promise<AttendanceVerificationMasterRow[]> {
     try {
-      // TEMPORARILY DISABLED - Always return empty array to process from scratch
-      console.log('🚫 TEMPORARILY DISABLED: Loading existing master data - processing from scratch');
-      return [];
-      
-      // Original code (commented out temporarily):
-      // const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
-      // return data.map(row => this.normalizeMasterRow(row));
+      console.log('📋 Loading existing master data from Google Sheets...');
+      const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
+      const masterData = data.map(row => this.normalizeMasterRow(row));
+      console.log(`✅ Loaded ${masterData.length} existing master records`);
+      return masterData;
     } catch (error) {
       console.log('📝 No existing master data found, starting fresh');
       return [];
