@@ -373,7 +373,7 @@ export class AttendanceVerificationService {
 
 
   /**
-   * ENHANCED PROCESS ATTENDANCE RECORD - With Invoice Balance Tracking
+   * ENHANCED PROCESS ATTENDANCE RECORD - With Direct Payment Matching
    */
   private async processAttendanceRecordWithInvoiceTracking(
     attendance: AttendanceRecord,
@@ -390,28 +390,10 @@ export class AttendanceVerificationService {
     const instructors = this.getField(attendance as any, ['Instructors','Instructor']) || '';
     const status = this.getField(attendance as any, ['Status']) || '';
     
-    // STEP 1: Find matching rule with EXACT matching
-    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
-    const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
+    console.log(`🔍 Processing: ${customerName} - ${membershipName}`);
     
-    if (!rule) {
-      // Package cannot be found in rules
-      console.log(`❌ Package cannot be found in rules: "${membershipName}" (${sessionType})`);
-      throw new Error(`Package cannot be found in rules: "${membershipName}"`);
-    }
-    
-    console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
-    
-    // STEP 2: Get prices from rules (NEVER modify these)
-    const packagePrice = this.round2(Number(rule.price || 0));
-    const sessionPrice = this.round2(Number(rule.unit_price || 0));
-    
-    // STEP 3: Find available invoice with sufficient balance (FIFO)
-    const availableInvoice = await invoiceVerificationService.findAvailableInvoice(
-      customerName, 
-      sessionPrice, 
-      invoiceVerifications
-    );
+    // STEP 1: Find matching payment by customer name and membership name
+    const matchingPayment = this.findMatchingPaymentDirect(customerName, membershipName, payments);
     
     let verificationStatus: 'Verified' | 'Not Verified' | 'Package Cannot be found';
     let invoiceNumber = '';
@@ -419,35 +401,48 @@ export class AttendanceVerificationService {
     let paymentDate = '';
     let updatedInvoices = invoiceVerifications;
     
-    if (availableInvoice) {
-      // STEP 4: Use invoice amount and update balance
-      verificationStatus = 'Verified';
-      invoiceNumber = availableInvoice.invoiceNumber;
-      amount = sessionPrice; // Use session price as the amount
-      paymentDate = availableInvoice.createdAt; // Use invoice creation date
+    if (matchingPayment) {
+      console.log(`✅ Payment match found: Invoice=${matchingPayment.Invoice}, Amount=${matchingPayment.Amount}, Memo="${matchingPayment.Memo}"`);
       
-      // Update invoice balance
-      updatedInvoices = await invoiceVerificationService.useInvoiceAmount(
-        availableInvoice.invoiceNumber,
-        sessionPrice,
-        invoiceVerifications
-      );
+      // STEP 2: Find matching rule with EXACT matching
+      const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
+      const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
       
-      console.log(`💰 Used invoice ${invoiceNumber} for ${customerName}, amount: ${amount}, remaining balance: ${updatedInvoices.find(i => i.invoiceNumber === invoiceNumber)?.remainingBalance}`);
-      
+      if (!rule) {
+        // Package cannot be found in rules
+        console.log(`❌ Package cannot be found in rules: "${membershipName}" (${sessionType})`);
+        verificationStatus = 'Package Cannot be found';
+        invoiceNumber = matchingPayment.Invoice;
+        amount = Number(matchingPayment.Amount || 0);
+        paymentDate = matchingPayment.Date;
+      } else {
+        console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
+        
+        // STEP 3: Use payment data for verification
+        verificationStatus = 'Verified';
+        invoiceNumber = matchingPayment.Invoice;
+        amount = Number(matchingPayment.Amount || 0);
+        paymentDate = matchingPayment.Date;
+        
+        // Update invoice verification tracking (for balance management)
+        updatedInvoices = await invoiceVerificationService.useInvoiceAmount(
+          matchingPayment.Invoice,
+          Number(rule.unit_price || 0),
+          invoiceVerifications
+        );
+      }
     } else {
-      // STEP 5: No available invoice - mark as unverified
+      console.log(`❌ No payment match found for ${customerName} with membership "${membershipName}"`);
       verificationStatus = 'Not Verified';
-      
-      // Mark invoices with insufficient balance as unverified
-      updatedInvoices = await invoiceVerificationService.markInvoiceUnverified(
-        customerName,
-        sessionPrice,
-        invoiceVerifications
-      );
-      
-      console.log(`❌ No available invoice for ${customerName} with sufficient balance for ${sessionPrice}`);
     }
+    
+    // STEP 4: Get rule for calculations (even if not found, use defaults)
+    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
+    const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
+    
+    // STEP 5: Get prices from rules or use payment amount
+    const packagePrice = rule ? this.round2(Number(rule.price || 0)) : 0;
+    const sessionPrice = rule ? this.round2(Number(rule.unit_price || 0)) : amount;
     
     // STEP 6: Calculate discounted session price (for calculations only)
     const discountedSessionPrice = sessionPrice; // Will be updated by discount application later
@@ -485,6 +480,43 @@ export class AttendanceVerificationService {
     };
     
     return { masterRow, updatedInvoices };
+  }
+
+  /**
+   * DIRECT PAYMENT MATCHING - Customer + Membership Name matching
+   */
+  private findMatchingPaymentDirect(customerName: string, membershipName: string, payments: PaymentRecord[]): PaymentRecord | null {
+    const normalizedCustomer = this.normalizeCustomerName(customerName);
+    const normalizedMembership = membershipName.toLowerCase().trim();
+
+    console.log(`🔍 Looking for payment match: Customer="${normalizedCustomer}", Membership="${normalizedMembership}"`);
+
+    const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === normalizedCustomer);
+    console.log(`📊 Found ${customerPayments.length} payments for customer "${normalizedCustomer}"`);
+
+    // Try to match by memo containing membership name (exact match first)
+    for (const payment of customerPayments) {
+      const memo = String(payment.Memo || '').toLowerCase().trim();
+      
+      // Exact match
+      if (memo === normalizedMembership) {
+        console.log(`✅ EXACT Payment match found: Invoice=${payment.Invoice}, Amount=${payment.Amount}, Memo="${payment.Memo}"`);
+        return payment;
+      }
+    }
+
+    // Try partial match
+    for (const payment of customerPayments) {
+      const memo = String(payment.Memo || '').toLowerCase().trim();
+      
+      if (memo.includes(normalizedMembership) || normalizedMembership.includes(memo)) {
+        console.log(`✅ PARTIAL Payment match found: Invoice=${payment.Invoice}, Amount=${payment.Amount}, Memo="${payment.Memo}"`);
+        return payment;
+      }
+    }
+
+    console.log(`❌ No payment match found for customer "${normalizedCustomer}" with membership "${normalizedMembership}"`);
+    return null;
   }
 
   /**
@@ -1038,7 +1070,7 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * NEW DISCOUNT APPLICATION - Apply discounts by invoice number
+   * NEW DISCOUNT APPLICATION - Apply discounts by invoice number and memo matching
    */
   private applyDiscountsByInvoice(
     master: AttendanceVerificationMasterRow[],
