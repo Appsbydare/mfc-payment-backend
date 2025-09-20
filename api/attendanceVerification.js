@@ -210,4 +210,51 @@ router.delete('/invoices', async (req, res) => {
   }
 });
 
+// Testing endpoint
+router.post('/test', async (req, res) => {
+  try {
+    console.log('🧪 Testing endpoint called');
+    
+    // Test 1: Check if invoice verification service is available
+    console.log('📋 Test 1: Checking invoice verification service...');
+    if (!invoiceVerificationService) {
+      throw new Error('Invoice verification service not available');
+    }
+    console.log('✅ Invoice verification service is available');
+    
+    // Test 2: Try to load existing data
+    console.log('📋 Test 2: Loading existing invoice verification data...');
+    const existingData = await invoiceVerificationService.loadInvoiceVerificationData();
+    console.log(`✅ Loaded ${existingData.length} existing records`);
+    
+    // Test 3: Try to initialize with dummy data
+    console.log('📋 Test 3: Initializing invoice verification...');
+    const initializedData = await invoiceVerificationService.initializeInvoiceVerification();
+    console.log(`✅ Initialized ${initializedData.length} invoice records`);
+    
+    // Test 4: Try to save dummy data
+    console.log('📋 Test 4: Saving invoice verification data...');
+    await invoiceVerificationService.saveInvoiceVerificationData(initializedData);
+    console.log('✅ Invoice verification data saved successfully');
+    
+    res.json({ 
+      success: true, 
+      message: 'All tests passed!',
+      data: {
+        existingRecords: existingData.length,
+        initializedRecords: initializedData.length,
+        sampleData: initializedData.slice(0, 3) // Return first 3 records as sample
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Testing failed:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error?.message || 'Testing failed',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
 module.exports = router;
