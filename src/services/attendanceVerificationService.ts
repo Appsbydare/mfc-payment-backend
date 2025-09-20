@@ -999,27 +999,28 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * FIND RULE BY ATTENDANCE ALIAS - For payment matching
+   * FIND RULE BY ATTENDANCE ALIAS - For payment matching (case-insensitive)
    */
   private findMatchingRuleByAttendanceAlias(membershipName: string, rules: any[]): any | null {
     if (!rules || rules.length === 0) return null;
 
     console.log(`🔍 Looking for rule by attendance_alias: "${membershipName}"`);
+    const normalizedMembership = membershipName.toLowerCase().trim();
 
     // Try exact matching with attendance_alias (column W)
     for (const r of rules) {
-      const attendanceAlias = String(r.attendance_alias || '').trim();
-      if (attendanceAlias && attendanceAlias.toLowerCase() === membershipName.toLowerCase()) {
-        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
+      const attendanceAlias = String(r.attendance_alias || '').trim().toLowerCase();
+      if (attendanceAlias && attendanceAlias === normalizedMembership) {
+        console.log(`✅ EXACT attendance_alias match: "${r.attendance_alias}" = "${membershipName}"`);
         return r;
       }
     }
 
     // Try exact matching with package_name (fallback)
     for (const r of rules) {
-      const packageName = String(r.package_name || '').trim();
-      if (packageName && packageName.toLowerCase() === membershipName.toLowerCase()) {
-        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+      const packageName = String(r.package_name || '').trim().toLowerCase();
+      if (packageName && packageName === normalizedMembership) {
+        console.log(`✅ EXACT package_name match: "${r.package_name}" = "${membershipName}"`);
         return r;
       }
     }
@@ -1058,15 +1059,17 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * FIND RULE BY MEMBERSHIP AND SESSION TYPE - Strict matching
+   * FIND RULE BY MEMBERSHIP AND SESSION TYPE - Strict matching (case-insensitive)
    */
   private findRuleByMembershipAndSessionType(membershipName: string, sessionType: string, rules: any[]): any | null {
+    const normalizedMembership = membershipName.toLowerCase().trim();
+    
     // First, try exact matching with attendance_alias (column W)
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
-      const attendanceAlias = String(r.attendance_alias || '').trim();
-      if (attendanceAlias && attendanceAlias === membershipName) {
-        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}" (${sessionType})`);
+      const attendanceAlias = String(r.attendance_alias || '').trim().toLowerCase();
+      if (attendanceAlias && attendanceAlias === normalizedMembership) {
+        console.log(`✅ EXACT attendance_alias match: "${r.attendance_alias}" = "${membershipName}" (${sessionType})`);
         return r;
       }
     }
@@ -1074,9 +1077,9 @@ export class AttendanceVerificationService {
     // Second, try exact matching with package_name
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
-      const packageName = String(r.package_name || '').trim();
-      if (packageName && packageName === membershipName) {
-        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}" (${sessionType})`);
+      const packageName = String(r.package_name || '').trim().toLowerCase();
+      if (packageName && packageName === normalizedMembership) {
+        console.log(`✅ EXACT package_name match: "${r.package_name}" = "${membershipName}" (${sessionType})`);
         return r;
       }
     }
@@ -1085,23 +1088,25 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * FIND RULE BY MEMBERSHIP ONLY - Flexible matching without session type
+   * FIND RULE BY MEMBERSHIP ONLY - Flexible matching without session type (case-insensitive)
    */
   private findRuleByMembershipOnly(membershipName: string, rules: any[]): any | null {
+    const normalizedMembership = membershipName.toLowerCase().trim();
+    
     // First, try exact matching with attendance_alias (column W)
     for (const r of rules) {
-      const attendanceAlias = String(r.attendance_alias || '').trim();
-      if (attendanceAlias && attendanceAlias === membershipName) {
-        console.log(`✅ EXACT attendance_alias match (no session type): "${attendanceAlias}" = "${membershipName}"`);
+      const attendanceAlias = String(r.attendance_alias || '').trim().toLowerCase();
+      if (attendanceAlias && attendanceAlias === normalizedMembership) {
+        console.log(`✅ EXACT attendance_alias match (no session type): "${r.attendance_alias}" = "${membershipName}"`);
         return r;
       }
     }
 
     // Second, try exact matching with package_name
     for (const r of rules) {
-      const packageName = String(r.package_name || '').trim();
-      if (packageName && packageName === membershipName) {
-        console.log(`✅ EXACT package_name match (no session type): "${packageName}" = "${membershipName}"`);
+      const packageName = String(r.package_name || '').trim().toLowerCase();
+      if (packageName && packageName === normalizedMembership) {
+        console.log(`✅ EXACT package_name match (no session type): "${r.package_name}" = "${membershipName}"`);
         return r;
       }
     }
