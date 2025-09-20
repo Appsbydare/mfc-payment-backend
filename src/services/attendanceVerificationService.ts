@@ -1,4 +1,5 @@
 import { googleSheetsService } from './googleSheets';
+import { invoiceVerificationService, InvoiceVerification } from './invoiceVerificationService';
 import { ruleService } from './ruleService';
 import { discountService } from './discountService';
 
@@ -81,8 +82,8 @@ export class AttendanceVerificationService {
   private readonly DISCOUNTS_SHEET = 'discounts';
 
   /**
-   * NEW VERIFICATION METHOD - Clean, simple approach
-   * Processes attendance and payment data from scratch
+   * ENHANCED VERIFICATION METHOD - With Invoice Balance Tracking
+   * Processes attendance and payment data with proper invoice balance management
    */
   async verifyAttendanceData(params: {
     fromDate?: string;
@@ -91,9 +92,22 @@ export class AttendanceVerificationService {
     clearExisting?: boolean;
   } = {}): Promise<VerificationResult> {
     try {
-      console.log('🔄 Starting NEW verification process...');
+      console.log('🔄 Starting ENHANCED verification process with invoice tracking...');
       
-      // Load all required data
+      // STEP 1: Initialize Invoice Verification System
+      console.log('📋 Step 1: Initializing invoice verification system...');
+      let invoiceVerifications = await invoiceVerificationService.loadInvoiceVerificationData();
+      
+      if (invoiceVerifications.length === 0) {
+        console.log('🆕 No existing invoice data found, initializing from payments...');
+        invoiceVerifications = await invoiceVerificationService.initializeInvoiceVerification();
+        await invoiceVerificationService.saveInvoiceVerificationData(invoiceVerifications);
+      }
+      
+      console.log(`📊 Loaded ${invoiceVerifications.length} invoice verification records`);
+      
+      // STEP 2: Load all required data
+      console.log('📋 Step 2: Loading attendance, payments, rules, and discounts...');
       const { attendance, payments, rules, discounts } = await this.loadAllData();
       
       // Filter data by date range if provided
@@ -102,20 +116,23 @@ export class AttendanceVerificationService {
       
       console.log(`📊 Processing ${filteredAttendance.length} attendance records and ${filteredPayments.length} payment records`);
       
-      // Process each attendance record from scratch
+      // STEP 3: Process each attendance record with invoice balance tracking
+      console.log('📋 Step 3: Processing attendance records with invoice balance tracking...');
       const masterRows: AttendanceVerificationMasterRow[] = [];
       let processedCount = 0;
       
       for (const attendanceRecord of filteredAttendance) {
         try {
-          const masterRow = await this.processAttendanceRecordNew(
+          const { masterRow, updatedInvoices } = await this.processAttendanceRecordWithInvoiceTracking(
             attendanceRecord,
             filteredPayments,
             rules,
-            discounts
+            discounts,
+            invoiceVerifications
           );
           
           masterRows.push(masterRow);
+          invoiceVerifications = updatedInvoices; // Update invoice balances
           processedCount++;
           
           console.log(`✅ Processed ${processedCount}/${filteredAttendance.length}: ${masterRow.customerName} - ${masterRow.verificationStatus}`);
@@ -125,13 +142,18 @@ export class AttendanceVerificationService {
         }
       }
       
-      // Apply discounts based on invoice numbers
+      // STEP 4: Apply discounts based on invoice numbers
+      console.log('📋 Step 4: Applying discounts...');
       const finalMasterRows = this.applyDiscountsByInvoice(masterRows, discounts);
       
-      // Calculate summary
+      // STEP 5: Save updated invoice verification data
+      console.log('📋 Step 5: Saving updated invoice verification data...');
+      await invoiceVerificationService.saveInvoiceVerificationData(invoiceVerifications);
+      
+      // STEP 6: Calculate summary
       const summary = this.calculateSummary(finalMasterRows);
       
-      console.log(`🎯 NEW Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
+      console.log(`🎯 ENHANCED Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
       
       return {
         masterRows: finalMasterRows,
@@ -139,7 +161,7 @@ export class AttendanceVerificationService {
       };
       
     } catch (error: any) {
-      console.error('❌ Error in NEW attendance verification:', error);
+      console.error('❌ Error in ENHANCED attendance verification:', error);
       throw new Error(`Attendance verification failed: ${error?.message || 'Unknown error'}`);
     }
   }
@@ -263,14 +285,15 @@ export class AttendanceVerificationService {
 
 
   /**
-   * NEW PROCESS ATTENDANCE RECORD - Clean, exact matching approach
+   * ENHANCED PROCESS ATTENDANCE RECORD - With Invoice Balance Tracking
    */
-  private async processAttendanceRecordNew(
+  private async processAttendanceRecordWithInvoiceTracking(
     attendance: AttendanceRecord,
     payments: PaymentRecord[],
     rules: any[],
-    discounts: any[]
-  ): Promise<AttendanceVerificationMasterRow> {
+    discounts: any[],
+    invoiceVerifications: InvoiceVerification[]
+  ): Promise<{ masterRow: AttendanceVerificationMasterRow; updatedInvoices: InvoiceVerification[] }> {
     
     // Normalize attendance data
     const customerName = this.getField(attendance as any, ['Customer Name','Customer']) || '';
@@ -291,27 +314,52 @@ export class AttendanceVerificationService {
     
     console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
     
-    // STEP 2: Find matching payment (Customer + Memo matching)
-    const matchingPayment = this.findMatchingPaymentNew(attendance, payments);
-    
-    // STEP 3: Determine verification status
-    let verificationStatus: 'Verified' | 'Not Verified' | 'Package Cannot be found';
-    if (!rule) {
-      verificationStatus = 'Package Cannot be found';
-    } else if (matchingPayment) {
-      verificationStatus = 'Verified';
-    } else {
-      verificationStatus = 'Not Verified';
-    }
-    
-    // STEP 4: Extract payment data
-    const invoiceNumber = matchingPayment?.Invoice || '';
-    const amount = matchingPayment ? parseFloat(String(matchingPayment.Amount)) : 0;
-    const paymentDate = matchingPayment?.Date || '';
-    
-    // STEP 5: Get prices from rules (NEVER modify these)
+    // STEP 2: Get prices from rules (NEVER modify these)
     const packagePrice = this.round2(Number(rule.price || 0));
     const sessionPrice = this.round2(Number(rule.unit_price || 0));
+    
+    // STEP 3: Find available invoice with sufficient balance (FIFO)
+    const availableInvoice = await invoiceVerificationService.findAvailableInvoice(
+      customerName, 
+      sessionPrice, 
+      invoiceVerifications
+    );
+    
+    let verificationStatus: 'Verified' | 'Not Verified' | 'Package Cannot be found';
+    let invoiceNumber = '';
+    let amount = 0;
+    let paymentDate = '';
+    let updatedInvoices = invoiceVerifications;
+    
+    if (availableInvoice) {
+      // STEP 4: Use invoice amount and update balance
+      verificationStatus = 'Verified';
+      invoiceNumber = availableInvoice.invoiceNumber;
+      amount = sessionPrice; // Use session price as the amount
+      paymentDate = availableInvoice.createdAt; // Use invoice creation date
+      
+      // Update invoice balance
+      updatedInvoices = await invoiceVerificationService.useInvoiceAmount(
+        availableInvoice.invoiceNumber,
+        sessionPrice,
+        invoiceVerifications
+      );
+      
+      console.log(`💰 Used invoice ${invoiceNumber} for ${customerName}, amount: ${amount}, remaining balance: ${updatedInvoices.find(i => i.invoiceNumber === invoiceNumber)?.remainingBalance}`);
+      
+    } else {
+      // STEP 5: No available invoice - mark as unverified
+      verificationStatus = 'Not Verified';
+      
+      // Mark invoices with insufficient balance as unverified
+      updatedInvoices = await invoiceVerificationService.markInvoiceUnverified(
+        customerName,
+        sessionPrice,
+        invoiceVerifications
+      );
+      
+      console.log(`❌ No available invoice for ${customerName} with sufficient balance for ${sessionPrice}`);
+    }
     
     // STEP 6: Calculate discounted session price (for calculations only)
     const discountedSessionPrice = sessionPrice; // Will be updated by discount application later
@@ -322,9 +370,9 @@ export class AttendanceVerificationService {
     // Generate unique key
     const uniqueKey = this.generateUniqueKey(attendance);
     
-    console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Verification Status=${verificationStatus}`);
+    console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Verification Status=${verificationStatus}, Invoice=${invoiceNumber}`);
     
-    return {
+    const masterRow: AttendanceVerificationMasterRow = {
       customerName,
       eventStartsAt,
       membershipName,
@@ -347,6 +395,8 @@ export class AttendanceVerificationService {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+    
+    return { masterRow, updatedInvoices };
   }
 
   /**

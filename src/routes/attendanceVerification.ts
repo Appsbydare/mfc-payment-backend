@@ -1,5 +1,6 @@
 import express from 'express';
 import { attendanceVerificationService, AttendanceVerificationMasterRow } from '../services/attendanceVerificationService';
+import { invoiceVerificationService } from '../services/invoiceVerificationService';
 import { googleSheetsService } from '../services/googleSheets';
 
 const router = express.Router();
@@ -390,6 +391,74 @@ router.post('/rewrite-master', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to rewrite master sheet'
+    });
+  }
+});
+
+/**
+ * @desc    Get invoice verification data
+ * @route   GET /api/attendance-verification/invoices
+ * @access  Private
+ */
+router.get('/invoices', async (req, res) => {
+  try {
+    const invoices = await invoiceVerificationService.loadInvoiceVerificationData();
+    
+    res.json({
+      success: true,
+      data: invoices
+    });
+  } catch (error: any) {
+    console.error('Error loading invoice verification data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to load invoice verification data'
+    });
+  }
+});
+
+/**
+ * @desc    Initialize invoice verification data from payments
+ * @route   POST /api/attendance-verification/invoices/initialize
+ * @access  Private
+ */
+router.post('/invoices/initialize', async (req, res) => {
+  try {
+    const invoices = await invoiceVerificationService.initializeInvoiceVerification();
+    await invoiceVerificationService.saveInvoiceVerificationData(invoices);
+    
+    res.json({
+      success: true,
+      message: 'Invoice verification data initialized successfully',
+      data: invoices
+    });
+  } catch (error: any) {
+    console.error('Error initializing invoice verification data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to initialize invoice verification data'
+    });
+  }
+});
+
+/**
+ * @desc    Clear invoice verification data
+ * @route   DELETE /api/attendance-verification/invoices
+ * @access  Private
+ */
+router.delete('/invoices', async (req, res) => {
+  try {
+    await invoiceVerificationService.saveInvoiceVerificationData([]);
+    
+    res.json({
+      success: true,
+      message: 'Invoice verification data cleared successfully'
+    });
+  } catch (error: any) {
+    console.error('Error clearing invoice verification data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to clear invoice verification data'
     });
   }
 });
