@@ -33,9 +33,12 @@ export class InvoiceVerificationService {
     try {
       console.log('🔄 Initializing invoice verification data...');
       
-      // Load all payments
-      const payments = await googleSheetsService.readSheet(this.PAYMENTS_SHEET);
-      console.log(`📊 Loaded ${payments.length} payment records`);
+      // Load all payments and rules
+      const [payments, rules] = await Promise.all([
+        googleSheetsService.readSheet(this.PAYMENTS_SHEET),
+        googleSheetsService.readSheet('rules').catch(() => [])
+      ]);
+      console.log(`📊 Loaded ${payments.length} payment records and ${rules.length} rules`);
       
       // Group payments by invoice number
       const invoiceMap = new Map<string, PaymentRecord[]>();
@@ -68,6 +71,14 @@ export class InvoiceVerificationService {
           return paymentDate < earliest ? paymentDate : earliest;
         }, new Date(invoicePayments[0].Date));
         
+        // Try to determine total sessions from rules based on memo/payment info
+        let totalSessions = 0;
+        const memo = String(invoicePayments[0].Memo || '').toLowerCase();
+        const sessionPrice = this.estimateSessionPriceFromRules(rules, memo);
+        if (sessionPrice > 0 && totalAmount > 0) {
+          totalSessions = Math.round(totalAmount / sessionPrice);
+        }
+        
         const invoiceVerification: InvoiceVerification = {
           invoiceNumber,
           customerName,
@@ -76,7 +87,7 @@ export class InvoiceVerificationService {
           remainingBalance: this.round2(totalAmount),
           status: 'Available',
           sessionsUsed: 0,
-          totalSessions: 0, // Will be calculated based on package
+          totalSessions: totalSessions,
           lastUsedDate: '',
           createdAt: createdAt.toISOString(),
           updatedAt: new Date().toISOString()
@@ -222,6 +233,13 @@ export class InvoiceVerificationService {
       const newRemainingBalance = this.round2(invoice.remainingBalance - amount);
       const newSessionsUsed = invoice.sessionsUsed + 1;
       
+      // Calculate total sessions based on package (if not already set)
+      let totalSessions = invoice.totalSessions;
+      if (totalSessions === 0 && invoice.totalAmount > 0 && amount > 0) {
+        // Estimate total sessions based on total amount and session price
+        totalSessions = Math.round(invoice.totalAmount / amount);
+      }
+      
       let newStatus: InvoiceVerification['status'] = 'Available';
       if (newRemainingBalance <= 0) {
         newStatus = 'Fully Used';
@@ -234,13 +252,15 @@ export class InvoiceVerificationService {
         usedAmount: newUsedAmount,
         remainingBalance: newRemainingBalance,
         sessionsUsed: newSessionsUsed,
+        totalSessions: totalSessions,
         status: newStatus,
         lastUsedDate: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
     });
     
-    console.log(`💰 Used ${amount} from invoice ${invoiceNumber}, remaining balance: ${updatedInvoices.find(i => i.invoiceNumber === invoiceNumber)?.remainingBalance}`);
+    const updatedInvoice = updatedInvoices.find(i => i.invoiceNumber === invoiceNumber);
+    console.log(`💰 Used ${amount} from invoice ${invoiceNumber}, remaining balance: ${updatedInvoice?.remainingBalance}, sessions: ${updatedInvoice?.sessionsUsed}/${updatedInvoice?.totalSessions}`);
     
     return updatedInvoices;
   }
@@ -306,6 +326,35 @@ export class InvoiceVerificationService {
    */
   private normalizeCustomerName(customerName: string): string {
     return String(customerName || '').trim().toLowerCase();
+  }
+
+  /**
+   * Estimate session price from rules based on memo
+   */
+  private estimateSessionPriceFromRules(rules: any[], memo: string): number {
+    if (!rules || rules.length === 0 || !memo) return 0;
+    
+    // Try to find a matching rule based on memo content
+    for (const rule of rules) {
+      const packageName = String(rule.package_name || '').toLowerCase();
+      const attendanceAlias = String(rule.attendance_alias || '').toLowerCase();
+      const unitPrice = Number(rule.unit_price || 0);
+      
+      if (unitPrice > 0 && (memo.includes(packageName) || memo.includes(attendanceAlias))) {
+        return unitPrice;
+      }
+    }
+    
+    // Fallback: use average unit price from all rules
+    const validPrices = rules
+      .map(r => Number(r.unit_price || 0))
+      .filter(p => p > 0);
+    
+    if (validPrices.length > 0) {
+      return validPrices.reduce((sum, price) => sum + price, 0) / validPrices.length;
+    }
+    
+    return 0;
   }
 
   /**

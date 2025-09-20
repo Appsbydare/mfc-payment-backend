@@ -91,8 +91,22 @@ export class AttendanceVerificationService {
     forceReverify?: boolean;
     clearExisting?: boolean;
   } = {}): Promise<VerificationResult> {
+    const startTime = Date.now();
+    let processedCount = 0;
+    let errorCount = 0;
+    
     try {
       console.log('🔄 Starting ENHANCED verification process with invoice tracking...');
+      console.log(`📅 Date range: ${params.fromDate || 'all'} to ${params.toDate || 'all'}`);
+      
+      // Validate input parameters
+      if (params.fromDate && params.toDate) {
+        const fromDate = new Date(params.fromDate);
+        const toDate = new Date(params.toDate);
+        if (fromDate > toDate) {
+          throw new Error('Invalid date range: fromDate cannot be after toDate');
+        }
+      }
       
       // STEP 1: Initialize Invoice Verification System
       console.log('📋 Step 1: Initializing invoice verification system...');
@@ -124,16 +138,37 @@ export class AttendanceVerificationService {
       console.log('📋 Step 2: Loading attendance, payments, rules, and discounts...');
       const { attendance, payments, rules, discounts } = await this.loadAllData();
       
+      // Validate loaded data
+      if (!attendance || attendance.length === 0) {
+        throw new Error('No attendance data found');
+      }
+      if (!rules || rules.length === 0) {
+        console.warn('⚠️ No rules data found - verification may not work properly');
+      }
+      
       // Filter data by date range if provided
       const filteredAttendance = this.filterAttendanceByDate(attendance, params.fromDate, params.toDate);
       const filteredPayments = this.filterPaymentsByDate(payments, params.fromDate, params.toDate);
       
       console.log(`📊 Processing ${filteredAttendance.length} attendance records and ${filteredPayments.length} payment records`);
       
+      if (filteredAttendance.length === 0) {
+        console.log('📝 No attendance records found in the specified date range');
+        return {
+          masterRows: [],
+          summary: {
+            totalRecords: 0,
+            verifiedRecords: 0,
+            unverifiedRecords: 0,
+            verificationRate: 0,
+            newRecordsAdded: 0
+          }
+        };
+      }
+      
       // STEP 3: Process each attendance record with invoice balance tracking
       console.log('📋 Step 3: Processing attendance records with invoice balance tracking...');
       const masterRows: AttendanceVerificationMasterRow[] = [];
-      let processedCount = 0;
       
       for (const attendanceRecord of filteredAttendance) {
         try {
@@ -151,8 +186,37 @@ export class AttendanceVerificationService {
           
           console.log(`✅ Processed ${processedCount}/${filteredAttendance.length}: ${masterRow.customerName} - ${masterRow.verificationStatus}`);
         } catch (error: any) {
-          console.error(`❌ Error processing record: ${error.message}`);
-          // Continue with next record
+          errorCount++;
+          console.error(`❌ Error processing record ${processedCount + 1}: ${error.message}`);
+          console.error(`   Customer: ${attendanceRecord.Customer}, Membership: ${attendanceRecord['Membership Name']}`);
+          
+          // Create error record for tracking
+          const errorRow: AttendanceVerificationMasterRow = {
+            customerName: attendanceRecord.Customer || 'Unknown',
+            eventStartsAt: attendanceRecord['Event Starts At'] || '',
+            membershipName: attendanceRecord['Membership Name'] || 'Unknown',
+            instructors: attendanceRecord.Instructors || '',
+            status: attendanceRecord.Status || '',
+            discount: '',
+            discountPercentage: 0,
+            verificationStatus: 'Package Cannot be found',
+            invoiceNumber: '',
+            amount: 0,
+            paymentDate: '',
+            packagePrice: 0,
+            sessionPrice: 0,
+            discountedSessionPrice: 0,
+            coachAmount: 0,
+            bgmAmount: 0,
+            managementAmount: 0,
+            mfcAmount: 0,
+            uniqueKey: this.generateUniqueKey(attendanceRecord),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          
+          masterRows.push(errorRow);
+          processedCount++;
         }
       }
       
@@ -164,10 +228,17 @@ export class AttendanceVerificationService {
       console.log('📋 Step 5: Saving updated invoice verification data...');
       await invoiceVerificationService.saveInvoiceVerificationData(invoiceVerifications);
       
-      // STEP 6: Calculate summary
+      // STEP 6: Save master verification data to payment_calc_detail sheet
+      console.log('📋 Step 6: Saving master verification data...');
+      await this.saveMasterData(finalMasterRows);
+      
+      // STEP 7: Calculate summary
       const summary = this.calculateSummary(finalMasterRows);
+      const processingTime = Date.now() - startTime;
       
       console.log(`🎯 ENHANCED Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
+      console.log(`⏱️ Processing time: ${processingTime}ms`);
+      console.log(`📊 Processed: ${processedCount} records, Errors: ${errorCount}`);
       
       return {
         masterRows: finalMasterRows,
@@ -175,7 +246,10 @@ export class AttendanceVerificationService {
       };
       
     } catch (error: any) {
+      const processingTime = Date.now() - startTime;
       console.error('❌ Error in ENHANCED attendance verification:', error);
+      console.error(`⏱️ Processing time before error: ${processingTime}ms`);
+      console.error(`📊 Processed before error: ${processedCount} records, Errors: ${errorCount}`);
       throw new Error(`Attendance verification failed: ${error?.message || 'Unknown error'}`);
     }
   }
