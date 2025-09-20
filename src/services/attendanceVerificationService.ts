@@ -220,9 +220,9 @@ export class AttendanceVerificationService {
         }
       }
       
-      // STEP 4: Apply discounts based on invoice numbers and memo matching
-      console.log('📋 Step 4: Applying discounts using memo-based matching...');
-      const finalMasterRows = this.applyDiscountsByInvoice(masterRows, discounts, payments);
+      // STEP 4: Skip discount application - handled separately by Add Discounts button
+      console.log('📋 Step 4: Skipping discount application - use Add Discounts button separately...');
+      const finalMasterRows = masterRows;
       
       // STEP 5: Save updated invoice verification data
       console.log('📋 Step 5: Saving updated invoice verification data...');
