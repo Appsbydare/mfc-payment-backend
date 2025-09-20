@@ -1,6 +1,6 @@
 const express = require('express');
 const { attendanceVerificationService } = require('../dist/services/attendanceVerificationService');
-const { invoiceVerificationService } = require('./invoiceVerificationService');
+const { invoiceVerificationService } = require('../dist/services/invoiceVerificationService');
 
 const router = express.Router();
 
@@ -268,7 +268,7 @@ router.post('/test', async (req, res) => {
           'Status': 'Available',
           'Sessions Used': 0,
           'Total Sessions': 0,
-          'Last Used Date': '',
+          'Last Used Date': '2025-09-20',
           'Created At': new Date().toISOString(),
           'Updated At': new Date().toISOString()
         }];
@@ -281,8 +281,60 @@ router.post('/test', async (req, res) => {
       console.log('⚠️ Sheet writing error:', writeError.message);
     }
     
-    // Test 6: Try to use the invoice verification service
-    console.log('📋 Test 6: Testing invoice verification service...');
+    // Test 6: Check if all required data is available for verification
+    console.log('📋 Test 6: Checking required data for verification...');
+    let dataCheck = {
+      attendance: 0,
+      payments: 0,
+      rules: 0,
+      discounts: 0
+    };
+    
+    try {
+      const { googleSheetsService } = require('../dist/services/googleSheets');
+      if (googleSheetsService) {
+        // Check attendance data
+        try {
+          const attendanceData = await googleSheetsService.readSheet('attendance');
+          dataCheck.attendance = attendanceData.length;
+          console.log(`✅ Attendance data: ${attendanceData.length} records`);
+        } catch (err) {
+          console.log('⚠️ Attendance data error:', err.message);
+        }
+        
+        // Check payments data
+        try {
+          const paymentsData = await googleSheetsService.readSheet('Payments');
+          dataCheck.payments = paymentsData.length;
+          console.log(`✅ Payments data: ${paymentsData.length} records`);
+        } catch (err) {
+          console.log('⚠️ Payments data error:', err.message);
+        }
+        
+        // Check rules data
+        try {
+          const rulesData = await googleSheetsService.readSheet('rules');
+          dataCheck.rules = rulesData.length;
+          console.log(`✅ Rules data: ${rulesData.length} records`);
+        } catch (err) {
+          console.log('⚠️ Rules data error:', err.message);
+        }
+        
+        // Check discounts data
+        try {
+          const discountsData = await googleSheetsService.readSheet('Discount Manager');
+          dataCheck.discounts = discountsData.length;
+          console.log(`✅ Discounts data: ${discountsData.length} records`);
+        } catch (err) {
+          console.log('⚠️ Discounts data error:', err.message);
+        }
+      }
+    } catch (dataError) {
+      console.log('⚠️ Data check error:', dataError.message);
+    }
+    
+    // Test 7: Try to use the invoice verification service
+    console.log('📋 Test 7: Testing invoice verification service...');
     try {
       if (invoiceVerificationService) {
         // Try to initialize invoice verification
@@ -302,6 +354,7 @@ router.post('/test', async (req, res) => {
       message: 'All tests completed!',
       data: {
         services,
+        dataCheck,
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'production',
         testsCompleted: [
@@ -309,7 +362,8 @@ router.post('/test', async (req, res) => {
           'Service availability',
           'Google Sheets connectivity',
           'Sheet reading',
-          'Sheet writing',
+          'Sheet writing with dummy data',
+          'Data availability check',
           'Invoice verification service'
         ]
       }
