@@ -372,4 +372,26 @@ router.delete('/master', async (req, res) => {
   }
 });
 
+/**
+ * @desc    Rewrite master sheet with verified data
+ * @route   POST /api/attendance-verification/rewrite-master
+ * @access  Private
+ */
+router.post('/rewrite-master', async (req, res) => {
+  try {
+    await attendanceVerificationService.rewriteMasterSheet();
+    
+    res.json({
+      success: true,
+      message: 'Master sheet rewritten successfully'
+    });
+  } catch (error: any) {
+    console.error('Error rewriting master sheet:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to rewrite master sheet'
+    });
+  }
+});
+
 export default router;

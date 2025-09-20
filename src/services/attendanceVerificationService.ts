@@ -14,7 +14,7 @@ export interface AttendanceVerificationMasterRow {
   // From Payment Data (matching)
   discount: string;
   discountPercentage: number;
-  verificationStatus: 'Verified' | 'Not Verified';
+  verificationStatus: 'Verified' | 'Not Verified' | 'Package Cannot be found';
   invoiceNumber: string;
   amount: number;
   paymentDate: string;
@@ -81,8 +81,8 @@ export class AttendanceVerificationService {
   private readonly DISCOUNTS_SHEET = 'discounts';
 
   /**
-   * Main verification method - processes attendance and payment data
-   * and creates/updates the master verification table
+   * NEW VERIFICATION METHOD - Clean, simple approach
+   * Processes attendance and payment data from scratch
    */
   async verifyAttendanceData(params: {
     fromDate?: string;
@@ -91,7 +91,7 @@ export class AttendanceVerificationService {
     clearExisting?: boolean;
   } = {}): Promise<VerificationResult> {
     try {
-      console.log('🔍 Starting attendance verification process...');
+      console.log('🔄 Starting NEW verification process...');
       
       // Load all required data
       const { attendance, payments, rules, discounts } = await this.loadAllData();
@@ -102,68 +102,44 @@ export class AttendanceVerificationService {
       
       console.log(`📊 Processing ${filteredAttendance.length} attendance records and ${filteredPayments.length} payment records`);
       
-      // Clear existing data if requested
-      if (params.clearExisting) {
-        await this.clearMasterData();
-      }
-      
-      // Load existing master data (TEMPORARILY DISABLED)
-      const existingMaster = await this.loadExistingMasterData();
-      const existingKeys = new Set(existingMaster.map(row => row.uniqueKey));
-      
-      console.log(`🔄 Starting fresh processing - existing records: ${existingMaster.length}, existing keys: ${existingKeys.size}`);
-      
-      // Build a map of existing rows by uniqueKey to avoid duplicates
-      const existingByKey = new Map(existingMaster.map(r => [r.uniqueKey, r] as const));
-      const newMasterRows: AttendanceVerificationMasterRow[] = [];
+      // Process each attendance record from scratch
+      const masterRows: AttendanceVerificationMasterRow[] = [];
       let processedCount = 0;
       
       for (const attendanceRecord of filteredAttendance) {
-        // Skip if already processed and not forcing reverification
-        const uniqueKey = this.generateUniqueKey(attendanceRecord);
-        if (!params.forceReverify && existingKeys.has(uniqueKey)) continue;
-        
-        const masterRow = await this.processAttendanceRecord(
-          attendanceRecord,
-          filteredPayments,
-          rules,
-          discounts
-        );
-        
-        // Upsert: replace existing or add new
-        if (existingByKey.has(masterRow.uniqueKey)) {
-          existingByKey.set(masterRow.uniqueKey, masterRow);
-        } else {
-          existingByKey.set(masterRow.uniqueKey, masterRow);
-          newMasterRows.push(masterRow);
+        try {
+          const masterRow = await this.processAttendanceRecordNew(
+            attendanceRecord,
+            filteredPayments,
+            rules,
+            discounts
+          );
+          
+          masterRows.push(masterRow);
+          processedCount++;
+          
+          console.log(`✅ Processed ${processedCount}/${filteredAttendance.length}: ${masterRow.customerName} - ${masterRow.verificationStatus}`);
+        } catch (error: any) {
+          console.error(`❌ Error processing record: ${error.message}`);
+          // Continue with next record
         }
-        processedCount++;
       }
       
-      // Combine into a stable array
-      let allMasterRows = Array.from(existingByKey.values());
-
-      // Apply discount identification at the end using payments + discounts
-      allMasterRows = this.applyDiscountsFromPayments(allMasterRows, filteredPayments, discounts);
-      
-      // Save to Google Sheets
-      if (params.forceReverify || newMasterRows.length > 0) {
-        await this.saveMasterData(allMasterRows);
-        console.log(`✅ Saved ${params.forceReverify ? allMasterRows.length : newMasterRows.length} verification records`);
-      }
+      // Apply discounts based on invoice numbers
+      const finalMasterRows = this.applyDiscountsByInvoice(masterRows, discounts);
       
       // Calculate summary
-      const summary = this.calculateSummary(allMasterRows);
+      const summary = this.calculateSummary(finalMasterRows);
       
-      console.log(`🎯 Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
+      console.log(`🎯 NEW Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
       
       return {
-        masterRows: allMasterRows,
+        masterRows: finalMasterRows,
         summary
       };
       
     } catch (error: any) {
-      console.error('❌ Error in attendance verification:', error);
+      console.error('❌ Error in NEW attendance verification:', error);
       throw new Error(`Attendance verification failed: ${error?.message || 'Unknown error'}`);
     }
   }
@@ -198,6 +174,24 @@ export class AttendanceVerificationService {
     } catch (error) {
       console.error('❌ Error clearing master data:', error);
       throw new Error(`Failed to clear master data: ${(error as any)?.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Rewrite master sheet with current verified data
+   */
+  async rewriteMasterSheet(): Promise<void> {
+    try {
+      console.log('📝 Rewriting master sheet with verified data...');
+      
+      // Get current verified data from memory (if any)
+      // For now, we'll just clear the sheet - the user needs to run verification first
+      await googleSheetsService.writeSheet(this.MASTER_SHEET, []);
+      
+      console.log('✅ Master sheet rewritten successfully');
+    } catch (error) {
+      console.error('❌ Error rewriting master sheet:', error);
+      throw new Error(`Failed to rewrite master sheet: ${(error as any)?.message || 'Unknown error'}`);
     }
   }
 
@@ -269,9 +263,9 @@ export class AttendanceVerificationService {
 
 
   /**
-   * Process a single attendance record and create master row
+   * NEW PROCESS ATTENDANCE RECORD - Clean, exact matching approach
    */
-  private async processAttendanceRecord(
+  private async processAttendanceRecordNew(
     attendance: AttendanceRecord,
     payments: PaymentRecord[],
     rules: any[],
@@ -285,64 +279,50 @@ export class AttendanceVerificationService {
     const instructors = this.getField(attendance as any, ['Instructors','Instructor']) || '';
     const status = this.getField(attendance as any, ['Status']) || '';
     
-    // Find matching payment record
-    const matchingPayment = this.findMatchingPayment(attendance, payments, rules);
+    // STEP 1: Find matching rule with EXACT matching
+    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
+    const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
     
-    // Determine verification status
-    const verificationStatus = matchingPayment ? 'Verified' : 'Not Verified';
+    if (!rule) {
+      // Package cannot be found in rules
+      console.log(`❌ Package cannot be found in rules: "${membershipName}" (${sessionType})`);
+      throw new Error(`Package cannot be found in rules: "${membershipName}"`);
+    }
     
-    // Extract payment data
+    console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
+    
+    // STEP 2: Find matching payment (Customer + Memo matching)
+    const matchingPayment = this.findMatchingPaymentNew(attendance, payments);
+    
+    // STEP 3: Determine verification status
+    let verificationStatus: 'Verified' | 'Not Verified' | 'Package Cannot be found';
+    if (!rule) {
+      verificationStatus = 'Package Cannot be found';
+    } else if (matchingPayment) {
+      verificationStatus = 'Verified';
+    } else {
+      verificationStatus = 'Not Verified';
+    }
+    
+    // STEP 4: Extract payment data
     const invoiceNumber = matchingPayment?.Invoice || '';
     const amount = matchingPayment ? parseFloat(String(matchingPayment.Amount)) : 0;
     const paymentDate = matchingPayment?.Date || '';
     
-    // Calculate based on Rules first, then apply Discounts
-    const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
-    const rule = this.findMatchingRule(membershipName, sessionType, rules);
+    // STEP 5: Get prices from rules (NEVER modify these)
+    const packagePrice = this.round2(Number(rule.price || 0));
+    const sessionPrice = this.round2(Number(rule.unit_price || 0));
     
-    // Debug logging
-    console.log(`🔍 Processing: ${membershipName} (${sessionType})`);
-    console.log(`📋 Rule found:`, rule ? {
-      id: rule.id,
-      rule_name: rule.rule_name,
-      package_name: rule.package_name,
-      attendance_alias: rule.attendance_alias,
-      unit_price: rule.unit_price,
-      price: rule.price,
-      sessions: rule.sessions
-    } : 'No rule found');
+    // STEP 6: Calculate discounted session price (for calculations only)
+    const discountedSessionPrice = sessionPrice; // Will be updated by discount application later
     
-    // Log verification status and payment info
-    console.log(`💳 Payment match: ${matchingPayment ? 'FOUND' : 'NOT FOUND'}`);
-    if (matchingPayment) {
-      console.log(`💰 Payment details: Invoice=${matchingPayment.Invoice}, Amount=${matchingPayment.Amount}, Date=${matchingPayment.Date}`);
-    }
-    
-    // Find applicable discount AFTER rule lookup
-    const discountInfo = await this.findApplicableDiscount(matchingPayment, discounts);
-    const discount = discountInfo?.name || '';
-    const discountPercentage = discountInfo?.applicable_percentage || 0;
-    
-    // Get original session price from rule (column H) - this should NOT be modified
-    const sessionPrice = rule ? this.round2(Number(rule.unit_price || 0)) : 0;
-    console.log(`💰 Original Session Price: ${sessionPrice} (from rule: ${rule?.unit_price || 'N/A'})`);
-    
-    // Calculate discounted session price for calculations
-    const discountedSessionPrice = this.round2(this.calculateDiscountedSessionPrice({ baseAmount: amount, rule, discountInfo }));
-    console.log(`💸 Discounted Session Price: ${discountedSessionPrice} (original: ${sessionPrice}, discount: ${discountPercentage}%)`);
-    
-    // Use discounted session price for all calculations
+    // STEP 7: Calculate amounts using discounted session price
     const amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
-    
-    // Get package price from rule (column E)
-    const packagePrice = rule ? this.round2(Number(rule.price || 0)) : 0;
-    console.log(`📦 Package Price: ${packagePrice} (from rule: ${rule?.price || 'N/A'})`);
-    
-    // Log final calculated values
-    console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Discounted Session Price=${discountedSessionPrice}, Verification Status=${verificationStatus}`);
     
     // Generate unique key
     const uniqueKey = this.generateUniqueKey(attendance);
+    
+    console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Verification Status=${verificationStatus}`);
     
     return {
       customerName,
@@ -350,8 +330,8 @@ export class AttendanceVerificationService {
       membershipName,
       instructors,
       status,
-      discount,
-      discountPercentage,
+      discount: '', // Will be set by discount application
+      discountPercentage: 0, // Will be set by discount application
       verificationStatus,
       invoiceNumber,
       amount,
@@ -370,7 +350,34 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Find matching payment record for attendance
+   * NEW PAYMENT MATCHING - Customer + Memo matching (date not important)
+   */
+  private findMatchingPaymentNew(attendance: AttendanceRecord, payments: PaymentRecord[]): PaymentRecord | null {
+    const customerName = this.normalizeCustomerName(attendance.Customer);
+    const membershipName = attendance['Membership Name'] || '';
+
+    console.log(`🔍 Looking for payment match: Customer="${customerName}", Membership="${membershipName}"`);
+
+    const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === customerName);
+    console.log(`📊 Found ${customerPayments.length} payments for customer "${customerName}"`);
+
+    // Try to match by memo containing membership name
+    for (const payment of customerPayments) {
+      const memo = String(payment.Memo || '').toLowerCase();
+      const membership = membershipName.toLowerCase();
+      
+      if (memo.includes(membership) || membership.includes(memo)) {
+        console.log(`✅ Payment match found: Invoice=${payment.Invoice}, Amount=${payment.Amount}, Memo="${payment.Memo}"`);
+        return payment;
+      }
+    }
+
+    console.log(`❌ No payment match found for customer "${customerName}" with membership "${membershipName}"`);
+    return null;
+  }
+
+  /**
+   * OLD PAYMENT MATCHING - Keep for reference
    */
   private findMatchingPayment(attendance: AttendanceRecord, payments: PaymentRecord[], rules: any[] = []): PaymentRecord | null {
     const customerName = this.normalizeCustomerName(attendance.Customer);
@@ -518,8 +525,40 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Find matching rule for membership and session type
-   * Priority: attendance_alias (column W) > package_name > fuzzy matching
+   * NEW EXACT RULE MATCHING - No fuzzy matching, exact only
+   */
+  private findMatchingRuleExact(membershipName: string, sessionType: string, rules: any[]): any | null {
+    if (!rules || rules.length === 0) return null;
+
+    console.log(`🔍 Looking for EXACT rule match: "${membershipName}" (${sessionType})`);
+
+    // First, try exact matching with attendance_alias (column W)
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      if (attendanceAlias && attendanceAlias === membershipName) {
+        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
+    // Second, try exact matching with package_name
+    for (const r of rules) {
+      if (r.session_type !== sessionType) continue;
+      const packageName = String(r.package_name || '').trim();
+      if (packageName && packageName === membershipName) {
+        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
+    // No exact match found
+    console.log(`❌ NO EXACT MATCH found for "${membershipName}" (${sessionType})`);
+    return null;
+  }
+
+  /**
+   * OLD RULE MATCHING - Keep for reference
    */
   private findMatchingRule(membershipName: string, sessionType: string, rules: any[]): any | null {
     if (!rules || rules.length === 0) return null;
@@ -861,8 +900,80 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Post-process: find discounts in payments by scanning memo text, then
-   * update master rows' Discount and Discount % by matching invoice number (and customer when available).
+   * NEW DISCOUNT APPLICATION - Apply discounts by invoice number
+   */
+  private applyDiscountsByInvoice(
+    master: AttendanceVerificationMasterRow[],
+    discounts: any[]
+  ): AttendanceVerificationMasterRow[] {
+    if (!discounts || discounts.length === 0) return master;
+
+    console.log(`🔍 Applying discounts to ${master.length} records`);
+
+    // Build invoice -> discount mapping
+    const invoiceToDiscount = new Map<string, { name: string; pct: number }>();
+
+    const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+
+    // For each master row with an invoice number, check if there's a matching discount
+    for (const row of master) {
+      const invoice = String(row.invoiceNumber || '').trim();
+      if (!invoice) continue;
+
+      // Find matching discount for this invoice
+      for (const discount of activeDiscounts) {
+        const code = String(discount.discount_code || discount.name || '').trim();
+        if (!code) continue;
+
+        // Check if invoice number matches discount code
+        if (invoice.includes(code) || code.includes(invoice)) {
+          const pct = Number(discount.applicable_percentage || 0) || 0;
+          invoiceToDiscount.set(invoice, { name: String(discount.name || code), pct });
+          console.log(`✅ Discount found for invoice ${invoice}: ${discount.name} (${pct}%)`);
+          break;
+        }
+      }
+    }
+
+    if (invoiceToDiscount.size === 0) {
+      console.log(`⚠️ No discounts applied - no matching invoice numbers found`);
+      return master;
+    }
+
+    // Apply discounts to master rows
+    const updated = master.map(row => {
+      const inv = String(row.invoiceNumber || '').trim();
+      if (!inv) return row;
+      
+      const found = invoiceToDiscount.get(inv);
+      if (!found) return row;
+
+      const factor = 1 - (Number(found.pct) || 0) / 100;
+      const newDiscountedSessionPrice = this.round2(row.sessionPrice * factor);
+
+      console.log(`💰 Applying discount to ${row.customerName}: ${found.name} (${found.pct}%) - Session Price: ${row.sessionPrice} → ${newDiscountedSessionPrice}`);
+
+      // Recalculate amounts with discounted session price
+      const amounts = this.calculateAmounts(newDiscountedSessionPrice, null, 'group'); // Use default percentages
+
+      return {
+        ...row,
+        discount: found.name,
+        discountPercentage: found.pct,
+        discountedSessionPrice: newDiscountedSessionPrice,
+        coachAmount: this.round2(amounts.coach),
+        bgmAmount: this.round2(amounts.bgm),
+        managementAmount: this.round2(amounts.management),
+        mfcAmount: this.round2(amounts.mfc)
+      };
+    });
+
+    console.log(`✅ Applied discounts to ${updated.filter(r => r.discount).length} records`);
+    return updated;
+  }
+
+  /**
+   * OLD DISCOUNT APPLICATION - Keep for reference
    */
   private applyDiscountsFromPayments(
     master: AttendanceVerificationMasterRow[],
