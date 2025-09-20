@@ -1030,19 +1030,43 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * NEW EXACT RULE MATCHING - No fuzzy matching, exact only
+   * ENHANCED RULE MATCHING - Flexible matching with session type fallback
    */
   private findMatchingRuleExact(membershipName: string, sessionType: string, rules: any[]): any | null {
     if (!rules || rules.length === 0) return null;
 
-    console.log(`🔍 Looking for EXACT rule match: "${membershipName}" (${sessionType})`);
+    console.log(`🔍 Looking for rule match: "${membershipName}" (${sessionType})`);
 
+    // STEP 1: Try exact matching with session type (strict)
+    let rule = this.findRuleByMembershipAndSessionType(membershipName, sessionType, rules);
+    if (rule) {
+      console.log(`✅ Found rule with session type match: "${rule.rule_name}"`);
+      return rule;
+    }
+
+    // STEP 2: Try matching without session type restriction (flexible)
+    console.log(`⚠️ No match with session type "${sessionType}", trying without session type restriction`);
+    rule = this.findRuleByMembershipOnly(membershipName, rules);
+    if (rule) {
+      console.log(`✅ Found rule without session type restriction: "${rule.rule_name}"`);
+      return rule;
+    }
+
+    // No match found
+    console.log(`❌ NO MATCH found for "${membershipName}" (${sessionType})`);
+    return null;
+  }
+
+  /**
+   * FIND RULE BY MEMBERSHIP AND SESSION TYPE - Strict matching
+   */
+  private findRuleByMembershipAndSessionType(membershipName: string, sessionType: string, rules: any[]): any | null {
     // First, try exact matching with attendance_alias (column W)
     for (const r of rules) {
       if (r.session_type !== sessionType) continue;
       const attendanceAlias = String(r.attendance_alias || '').trim();
       if (attendanceAlias && attendanceAlias === membershipName) {
-        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
+        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}" (${sessionType})`);
         return r;
       }
     }
@@ -1052,13 +1076,36 @@ export class AttendanceVerificationService {
       if (r.session_type !== sessionType) continue;
       const packageName = String(r.package_name || '').trim();
       if (packageName && packageName === membershipName) {
-        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}" (${sessionType})`);
         return r;
       }
     }
 
-    // No exact match found
-    console.log(`❌ NO EXACT MATCH found for "${membershipName}" (${sessionType})`);
+    return null;
+  }
+
+  /**
+   * FIND RULE BY MEMBERSHIP ONLY - Flexible matching without session type
+   */
+  private findRuleByMembershipOnly(membershipName: string, rules: any[]): any | null {
+    // First, try exact matching with attendance_alias (column W)
+    for (const r of rules) {
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      if (attendanceAlias && attendanceAlias === membershipName) {
+        console.log(`✅ EXACT attendance_alias match (no session type): "${attendanceAlias}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
+    // Second, try exact matching with package_name
+    for (const r of rules) {
+      const packageName = String(r.package_name || '').trim();
+      if (packageName && packageName === membershipName) {
+        console.log(`✅ EXACT package_name match (no session type): "${packageName}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
     return null;
   }
 
