@@ -392,8 +392,8 @@ export class AttendanceVerificationService {
     
     console.log(`🔍 Processing: ${customerName} - ${membershipName}`);
     
-    // STEP 1: Find matching payment by customer name and membership name
-    const matchingPayment = this.findMatchingPaymentDirect(customerName, membershipName, payments);
+    // STEP 1: Find matching payment by customer name and membership name using enhanced matching
+    const matchingPayment = this.findMatchingPaymentDirect(customerName, membershipName, payments, rules);
     
     let verificationStatus: 'Verified' | 'Not Verified' | 'Package Cannot be found';
     let invoiceNumber = '';
@@ -425,10 +425,13 @@ export class AttendanceVerificationService {
         paymentDate = matchingPayment.Date;
         
         // Update invoice verification tracking (for balance management)
-        updatedInvoices = await invoiceVerificationService.useInvoiceAmount(
+        updatedInvoices = await this.useInvoiceForSession(
+          customerName,
           matchingPayment.Invoice,
           Number(rule.unit_price || 0),
-          invoiceVerifications
+          invoiceVerifications,
+          payments,
+          rules
         );
       }
     } else {
@@ -483,9 +486,9 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * DIRECT PAYMENT MATCHING - Customer + Membership Name matching
+   * ENHANCED PAYMENT MATCHING - Using payment_memo_alias from rules
    */
-  private findMatchingPaymentDirect(customerName: string, membershipName: string, payments: PaymentRecord[]): PaymentRecord | null {
+  private findMatchingPaymentDirect(customerName: string, membershipName: string, payments: PaymentRecord[], rules: any[]): PaymentRecord | null {
     const normalizedCustomer = this.normalizeCustomerName(customerName);
     const normalizedMembership = membershipName.toLowerCase().trim();
 
@@ -494,7 +497,36 @@ export class AttendanceVerificationService {
     const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === normalizedCustomer);
     console.log(`📊 Found ${customerPayments.length} payments for customer "${normalizedCustomer}"`);
 
-    // Try to match by memo containing membership name (exact match first)
+    // First, find the rule that matches this membership name using attendance_alias
+    const matchingRule = this.findMatchingRuleByAttendanceAlias(membershipName, rules);
+    
+    if (matchingRule && matchingRule.payment_memo_alias) {
+      const paymentMemoAlias = String(matchingRule.payment_memo_alias).toLowerCase().trim();
+      console.log(`📋 Found rule with payment_memo_alias: "${paymentMemoAlias}"`);
+      
+      // Try to match by payment_memo_alias (exact match first)
+      for (const payment of customerPayments) {
+        const memo = String(payment.Memo || '').toLowerCase().trim();
+        
+        // Exact match with payment_memo_alias
+        if (memo === paymentMemoAlias) {
+          console.log(`✅ EXACT Payment match found using payment_memo_alias: Invoice=${payment.Invoice}, Amount=${payment.Amount}, Memo="${payment.Memo}"`);
+          return payment;
+        }
+      }
+
+      // Try partial match with payment_memo_alias
+      for (const payment of customerPayments) {
+        const memo = String(payment.Memo || '').toLowerCase().trim();
+        
+        if (memo.includes(paymentMemoAlias) || paymentMemoAlias.includes(memo)) {
+          console.log(`✅ PARTIAL Payment match found using payment_memo_alias: Invoice=${payment.Invoice}, Amount=${payment.Amount}, Memo="${payment.Memo}"`);
+          return payment;
+        }
+      }
+    }
+
+    // Fallback: Try to match by memo containing membership name (exact match first)
     for (const payment of customerPayments) {
       const memo = String(payment.Memo || '').toLowerCase().trim();
       
@@ -692,6 +724,192 @@ export class AttendanceVerificationService {
       management: (sessionPrice * rule.management_percentage) / 100,
       mfc: (sessionPrice * rule.mfc_percentage) / 100
     };
+  }
+
+  /**
+   * USE INVOICE FOR SESSION - Enhanced invoice balance management
+   */
+  private async useInvoiceForSession(
+    customerName: string,
+    invoiceNumber: string,
+    sessionPrice: number,
+    invoiceVerifications: InvoiceVerification[],
+    payments: PaymentRecord[],
+    rules: any[]
+  ): Promise<InvoiceVerification[]> {
+    
+    console.log(`💰 Using invoice ${invoiceNumber} for session (${sessionPrice}) for customer ${customerName}`);
+    
+    // Find the invoice in verification data
+    let invoice = invoiceVerifications.find(inv => inv.invoiceNumber === invoiceNumber);
+    
+    if (!invoice) {
+      console.log(`⚠️ Invoice ${invoiceNumber} not found in verification data, creating new entry`);
+      
+      // Find the payment record to get invoice details
+      const paymentRecord = payments.find(p => p.Invoice === invoiceNumber);
+      if (paymentRecord) {
+        // Create new invoice verification record
+        invoice = {
+          invoiceNumber,
+          customerName: this.normalizeCustomerName(customerName),
+          totalAmount: Number(paymentRecord.Amount || 0),
+          usedAmount: 0,
+          remainingBalance: Number(paymentRecord.Amount || 0),
+          status: 'Available',
+          sessionsUsed: 0,
+          totalSessions: 0,
+          lastUsedDate: '',
+          createdAt: paymentRecord.Date,
+          updatedAt: new Date().toISOString()
+        };
+        
+        // Calculate total sessions based on package amount and session price
+        if (sessionPrice > 0) {
+          invoice.totalSessions = Math.round(invoice.totalAmount / sessionPrice);
+        }
+        
+        invoiceVerifications.push(invoice);
+      } else {
+        console.log(`❌ Payment record not found for invoice ${invoiceNumber}`);
+        return invoiceVerifications;
+      }
+    }
+    
+    // Check if invoice has sufficient balance
+    if (invoice.remainingBalance < sessionPrice) {
+      console.log(`⚠️ Invoice ${invoiceNumber} has insufficient balance (${invoice.remainingBalance} < ${sessionPrice})`);
+      
+      // Try to find next available invoice for this customer
+      const nextInvoice = await this.findNextAvailableInvoice(customerName, sessionPrice, invoiceVerifications, payments, rules);
+      
+      if (nextInvoice) {
+        console.log(`✅ Found next available invoice: ${nextInvoice.invoiceNumber}`);
+        return await this.useInvoiceForSession(customerName, nextInvoice.invoiceNumber, sessionPrice, invoiceVerifications, payments, rules);
+      } else {
+        console.log(`❌ No available invoice found for customer ${customerName}`);
+        return invoiceVerifications;
+      }
+    }
+    
+    // Use the invoice amount
+    const newUsedAmount = this.round2(invoice.usedAmount + sessionPrice);
+    const newRemainingBalance = this.round2(invoice.remainingBalance - sessionPrice);
+    const newSessionsUsed = invoice.sessionsUsed + 1;
+    
+    let newStatus: InvoiceVerification['status'] = 'Available';
+    if (newRemainingBalance <= 0) {
+      newStatus = 'Fully Used';
+    } else if (newUsedAmount > 0) {
+      newStatus = 'Partially Used';
+    }
+    
+    // Update the invoice
+    const updatedInvoices = invoiceVerifications.map(inv => {
+      if (inv.invoiceNumber === invoiceNumber) {
+        return {
+          ...inv,
+          usedAmount: newUsedAmount,
+          remainingBalance: newRemainingBalance,
+          sessionsUsed: newSessionsUsed,
+          status: newStatus,
+          lastUsedDate: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return inv;
+    });
+    
+    console.log(`✅ Updated invoice ${invoiceNumber}: Sessions ${newSessionsUsed}/${invoice.totalSessions}, Balance: ${newRemainingBalance}`);
+    
+    return updatedInvoices;
+  }
+
+  /**
+   * FIND NEXT AVAILABLE INVOICE - For customers with multiple invoices
+   */
+  private async findNextAvailableInvoice(
+    customerName: string,
+    requiredAmount: number,
+    invoiceVerifications: InvoiceVerification[],
+    payments: PaymentRecord[],
+    rules: any[]
+  ): Promise<InvoiceVerification | null> {
+    
+    const normalizedCustomer = this.normalizeCustomerName(customerName);
+    
+    // Find all invoices for this customer with sufficient balance
+    const availableInvoices = invoiceVerifications.filter(invoice => 
+      invoice.customerName === normalizedCustomer && 
+      invoice.remainingBalance >= requiredAmount &&
+      invoice.status !== 'Fully Used'
+    );
+    
+    if (availableInvoices.length === 0) {
+      // Try to find new invoices from payments that aren't in verification data yet
+      const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === normalizedCustomer);
+      const existingInvoiceNumbers = new Set(invoiceVerifications.map(inv => inv.invoiceNumber));
+      
+      for (const payment of customerPayments) {
+        if (!existingInvoiceNumbers.has(payment.Invoice) && Number(payment.Amount || 0) >= requiredAmount) {
+          console.log(`🆕 Found new invoice from payments: ${payment.Invoice}`);
+          
+          // Create new invoice verification record
+          const newInvoice: InvoiceVerification = {
+            invoiceNumber: payment.Invoice,
+            customerName: normalizedCustomer,
+            totalAmount: Number(payment.Amount || 0),
+            usedAmount: 0,
+            remainingBalance: Number(payment.Amount || 0),
+            status: 'Available',
+            sessionsUsed: 0,
+            totalSessions: 0,
+            lastUsedDate: '',
+            createdAt: payment.Date,
+            updatedAt: new Date().toISOString()
+          };
+          
+          invoiceVerifications.push(newInvoice);
+          return newInvoice;
+        }
+      }
+      
+      return null;
+    }
+    
+    // Return oldest invoice (FIFO)
+    return availableInvoices[0];
+  }
+
+  /**
+   * FIND RULE BY ATTENDANCE ALIAS - For payment matching
+   */
+  private findMatchingRuleByAttendanceAlias(membershipName: string, rules: any[]): any | null {
+    if (!rules || rules.length === 0) return null;
+
+    console.log(`🔍 Looking for rule by attendance_alias: "${membershipName}"`);
+
+    // Try exact matching with attendance_alias (column W)
+    for (const r of rules) {
+      const attendanceAlias = String(r.attendance_alias || '').trim();
+      if (attendanceAlias && attendanceAlias.toLowerCase() === membershipName.toLowerCase()) {
+        console.log(`✅ EXACT attendance_alias match: "${attendanceAlias}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
+    // Try exact matching with package_name (fallback)
+    for (const r of rules) {
+      const packageName = String(r.package_name || '').trim();
+      if (packageName && packageName.toLowerCase() === membershipName.toLowerCase()) {
+        console.log(`✅ EXACT package_name match: "${packageName}" = "${membershipName}"`);
+        return r;
+      }
+    }
+
+    // No exact match found
+    console.log(`❌ NO EXACT MATCH found for "${membershipName}"`);
+    return null;
   }
 
   /**
