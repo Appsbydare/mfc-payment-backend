@@ -308,7 +308,7 @@ export class AttendanceVerificationService {
   /**
    * Load all required data from Google Sheets
    */
-  private async loadAllData() {
+  async loadAllData() {
     const [attendance, payments, rawRules, discounts] = await Promise.all([
       googleSheetsService.readSheet(this.ATTENDANCE_SHEET).catch(() => []),
       googleSheetsService.readSheet(this.PAYMENTS_SHEET).catch(() => []),
@@ -1224,7 +1224,7 @@ export class AttendanceVerificationService {
   /**
    * Generate unique key for attendance record
    */
-  private generateUniqueKey(attendance: AttendanceRecord): string {
+  generateUniqueKey(attendance: AttendanceRecord): string {
     const date = attendance['Event Starts At'] || attendance.Date || '';
     const customer = attendance.Customer || '';
     const membership = attendance['Membership Name'] || '';
@@ -1331,7 +1331,7 @@ export class AttendanceVerificationService {
   /**
    * Save master data to Google Sheets
    */
-  private async saveMasterData(rows: AttendanceVerificationMasterRow[]): Promise<void> {
+  async saveMasterData(rows: AttendanceVerificationMasterRow[]): Promise<void> {
     // Write as array of objects so the GoogleSheetsService can derive headers correctly
     const dataObjects = rows.map(row => ({
       'Customer Name': row.customerName,
@@ -1410,7 +1410,7 @@ export class AttendanceVerificationService {
     return score >= 0.5;
   }
 
-  private filterAttendanceByDate(attendance: AttendanceRecord[], fromDate?: string, toDate?: string): AttendanceRecord[] {
+  filterAttendanceByDate(attendance: AttendanceRecord[], fromDate?: string, toDate?: string): AttendanceRecord[] {
     if (!fromDate && !toDate) return attendance;
     
     return attendance.filter(record => {
@@ -1431,7 +1431,7 @@ export class AttendanceVerificationService {
     });
   }
 
-  private filterPaymentsByDate(payments: PaymentRecord[], fromDate?: string, toDate?: string): PaymentRecord[] {
+  filterPaymentsByDate(payments: PaymentRecord[], fromDate?: string, toDate?: string): PaymentRecord[] {
     if (!fromDate && !toDate) return payments;
     
     return payments.filter(record => {
