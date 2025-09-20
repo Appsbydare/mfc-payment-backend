@@ -420,19 +420,21 @@ export class AttendanceVerificationService {
         
         // STEP 3: Use payment data for verification
         verificationStatus = 'Verified';
-        invoiceNumber = matchingPayment.Invoice;
-        amount = Number(matchingPayment.Amount || 0);
-        paymentDate = matchingPayment.Date;
         
         // Update invoice verification tracking (for balance management)
-        updatedInvoices = await this.useInvoiceForSession(
+        const invoiceResult = await this.useInvoiceForSession(
           customerName,
-          matchingPayment.Invoice,
           Number(rule.unit_price || 0),
+          attendance['Event Starts at'] || '',
           invoiceVerifications,
           payments,
           rules
         );
+        
+        updatedInvoices = invoiceResult.updatedInvoices;
+        invoiceNumber = invoiceResult.usedInvoiceNumber;
+        amount = invoiceResult.usedAmount;
+        paymentDate = invoiceResult.usedPaymentDate;
       }
     } else {
       console.log(`❌ No payment match found for ${customerName} with membership "${membershipName}"`);
@@ -727,75 +729,38 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * USE INVOICE FOR SESSION - Enhanced invoice balance management
+   * USE INVOICE FOR SESSION - Enhanced invoice balance management with proper invoice selection
    */
   private async useInvoiceForSession(
     customerName: string,
-    invoiceNumber: string,
     sessionPrice: number,
+    sessionDate: string,
     invoiceVerifications: InvoiceVerification[],
     payments: PaymentRecord[],
     rules: any[]
-  ): Promise<InvoiceVerification[]> {
+  ): Promise<{ updatedInvoices: InvoiceVerification[]; usedInvoiceNumber: string; usedAmount: number; usedPaymentDate: string }> {
     
-    console.log(`💰 Using invoice ${invoiceNumber} for session (${sessionPrice}) for customer ${customerName}`);
+    console.log(`💰 Finding appropriate invoice for session (${sessionPrice}) on ${sessionDate} for customer ${customerName}`);
     
-    // Find the invoice in verification data
-    let invoice = invoiceVerifications.find(inv => inv.invoiceNumber === invoiceNumber);
+    // Find the best available invoice for this customer and session
+    const bestInvoice = await this.findBestAvailableInvoice(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules);
     
-    if (!invoice) {
-      console.log(`⚠️ Invoice ${invoiceNumber} not found in verification data, creating new entry`);
-      
-      // Find the payment record to get invoice details
-      const paymentRecord = payments.find(p => p.Invoice === invoiceNumber);
-      if (paymentRecord) {
-        // Create new invoice verification record
-        invoice = {
-          invoiceNumber,
-          customerName: this.normalizeCustomerName(customerName),
-          totalAmount: Number(paymentRecord.Amount || 0),
-          usedAmount: 0,
-          remainingBalance: Number(paymentRecord.Amount || 0),
-          status: 'Available',
-          sessionsUsed: 0,
-          totalSessions: 0,
-          lastUsedDate: '',
-          createdAt: paymentRecord.Date,
-          updatedAt: new Date().toISOString()
-        };
-        
-        // Calculate total sessions based on package amount and session price
-        if (sessionPrice > 0) {
-          invoice.totalSessions = Math.round(invoice.totalAmount / sessionPrice);
-        }
-        
-        invoiceVerifications.push(invoice);
-      } else {
-        console.log(`❌ Payment record not found for invoice ${invoiceNumber}`);
-        return invoiceVerifications;
-      }
+    if (!bestInvoice) {
+      console.log(`❌ No available invoice found for customer ${customerName}`);
+      return {
+        updatedInvoices: invoiceVerifications,
+        usedInvoiceNumber: '',
+        usedAmount: 0,
+        usedPaymentDate: ''
+      };
     }
     
-    // Check if invoice has sufficient balance
-    if (invoice.remainingBalance < sessionPrice) {
-      console.log(`⚠️ Invoice ${invoiceNumber} has insufficient balance (${invoice.remainingBalance} < ${sessionPrice})`);
-      
-      // Try to find next available invoice for this customer
-      const nextInvoice = await this.findNextAvailableInvoice(customerName, sessionPrice, invoiceVerifications, payments, rules);
-      
-      if (nextInvoice) {
-        console.log(`✅ Found next available invoice: ${nextInvoice.invoiceNumber}`);
-        return await this.useInvoiceForSession(customerName, nextInvoice.invoiceNumber, sessionPrice, invoiceVerifications, payments, rules);
-      } else {
-        console.log(`❌ No available invoice found for customer ${customerName}`);
-        return invoiceVerifications;
-      }
-    }
+    console.log(`✅ Using invoice ${bestInvoice.invoiceNumber} for session`);
     
     // Use the invoice amount
-    const newUsedAmount = this.round2(invoice.usedAmount + sessionPrice);
-    const newRemainingBalance = this.round2(invoice.remainingBalance - sessionPrice);
-    const newSessionsUsed = invoice.sessionsUsed + 1;
+    const newUsedAmount = this.round2(bestInvoice.usedAmount + sessionPrice);
+    const newRemainingBalance = this.round2(bestInvoice.remainingBalance - sessionPrice);
+    const newSessionsUsed = bestInvoice.sessionsUsed + 1;
     
     let newStatus: InvoiceVerification['status'] = 'Available';
     if (newRemainingBalance <= 0) {
@@ -806,7 +771,7 @@ export class AttendanceVerificationService {
     
     // Update the invoice
     const updatedInvoices = invoiceVerifications.map(inv => {
-      if (inv.invoiceNumber === invoiceNumber) {
+      if (inv.invoiceNumber === bestInvoice.invoiceNumber) {
         return {
           ...inv,
           usedAmount: newUsedAmount,
@@ -820,23 +785,37 @@ export class AttendanceVerificationService {
       return inv;
     });
     
-    console.log(`✅ Updated invoice ${invoiceNumber}: Sessions ${newSessionsUsed}/${invoice.totalSessions}, Balance: ${newRemainingBalance}`);
+    // Get payment details for the used invoice
+    const paymentRecord = payments.find(p => p.Invoice === bestInvoice.invoiceNumber);
+    const usedAmount = paymentRecord ? Number(paymentRecord.Amount || 0) : 0;
+    const usedPaymentDate = paymentRecord ? paymentRecord.Date : '';
     
-    return updatedInvoices;
+    console.log(`✅ Updated invoice ${bestInvoice.invoiceNumber}: Sessions ${newSessionsUsed}/${bestInvoice.totalSessions}, Balance: ${newRemainingBalance}`);
+    
+    return {
+      updatedInvoices,
+      usedInvoiceNumber: bestInvoice.invoiceNumber,
+      usedAmount,
+      usedPaymentDate
+    };
   }
 
   /**
-   * FIND NEXT AVAILABLE INVOICE - For customers with multiple invoices
+   * FIND BEST AVAILABLE INVOICE - Enhanced invoice selection based on payment dates and FIFO
    */
-  private async findNextAvailableInvoice(
+  private async findBestAvailableInvoice(
     customerName: string,
     requiredAmount: number,
+    sessionDate: string,
     invoiceVerifications: InvoiceVerification[],
     payments: PaymentRecord[],
     rules: any[]
   ): Promise<InvoiceVerification | null> {
     
     const normalizedCustomer = this.normalizeCustomerName(customerName);
+    
+    // First, ensure all customer payments are in verification data
+    await this.ensureAllInvoicesInVerification(normalizedCustomer, invoiceVerifications, payments, rules);
     
     // Find all invoices for this customer with sufficient balance
     const availableInvoices = invoiceVerifications.filter(invoice => 
@@ -846,39 +825,108 @@ export class AttendanceVerificationService {
     );
     
     if (availableInvoices.length === 0) {
-      // Try to find new invoices from payments that aren't in verification data yet
-      const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === normalizedCustomer);
-      const existingInvoiceNumbers = new Set(invoiceVerifications.map(inv => inv.invoiceNumber));
-      
-      for (const payment of customerPayments) {
-        if (!existingInvoiceNumbers.has(payment.Invoice) && Number(payment.Amount || 0) >= requiredAmount) {
-          console.log(`🆕 Found new invoice from payments: ${payment.Invoice}`);
-          
-          // Create new invoice verification record
-          const newInvoice: InvoiceVerification = {
-            invoiceNumber: payment.Invoice,
-            customerName: normalizedCustomer,
-            totalAmount: Number(payment.Amount || 0),
-            usedAmount: 0,
-            remainingBalance: Number(payment.Amount || 0),
-            status: 'Available',
-            sessionsUsed: 0,
-            totalSessions: 0,
-            lastUsedDate: '',
-            createdAt: payment.Date,
-            updatedAt: new Date().toISOString()
-          };
-          
-          invoiceVerifications.push(newInvoice);
-          return newInvoice;
-        }
-      }
-      
+      console.log(`❌ No available invoices found for customer ${normalizedCustomer}`);
       return null;
     }
     
-    // Return oldest invoice (FIFO)
-    return availableInvoices[0];
+    // Sort by payment date (FIFO - First In, First Out)
+    const sortedInvoices = availableInvoices.sort((a, b) => {
+      const paymentA = payments.find(p => p.Invoice === a.invoiceNumber);
+      const paymentB = payments.find(p => p.Invoice === b.invoiceNumber);
+      
+      if (!paymentA || !paymentB) return 0;
+      
+      const dateA = new Date(paymentA.Date);
+      const dateB = new Date(paymentB.Date);
+      
+      return dateA.getTime() - dateB.getTime(); // Oldest first
+    });
+    
+    console.log(`📋 Available invoices for ${normalizedCustomer}: ${sortedInvoices.map(inv => `${inv.invoiceNumber}(${inv.remainingBalance})`).join(', ')}`);
+    
+    // Return the oldest available invoice (FIFO)
+    const selectedInvoice = sortedInvoices[0];
+    console.log(`✅ Selected invoice ${selectedInvoice.invoiceNumber} (oldest available)`);
+    
+    return selectedInvoice;
+  }
+
+  /**
+   * ENSURE ALL INVOICES IN VERIFICATION - Add missing invoices from payments
+   */
+  private async ensureAllInvoicesInVerification(
+    customerName: string,
+    invoiceVerifications: InvoiceVerification[],
+    payments: PaymentRecord[],
+    rules: any[]
+  ): Promise<void> {
+    
+    const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === customerName);
+    const existingInvoiceNumbers = new Set(invoiceVerifications.map(inv => inv.invoiceNumber));
+    
+    for (const payment of customerPayments) {
+      if (!existingInvoiceNumbers.has(payment.Invoice)) {
+        console.log(`🆕 Adding missing invoice to verification: ${payment.Invoice}`);
+        
+        // Create new invoice verification record
+        const newInvoice: InvoiceVerification = {
+          invoiceNumber: payment.Invoice,
+          customerName: customerName,
+          totalAmount: Number(payment.Amount || 0),
+          usedAmount: 0,
+          remainingBalance: Number(payment.Amount || 0),
+          status: 'Available',
+          sessionsUsed: 0,
+          totalSessions: 0,
+          lastUsedDate: '',
+          createdAt: payment.Date,
+          updatedAt: new Date().toISOString()
+        };
+        
+        // Calculate total sessions based on package amount and session price
+        const memo = String(payment.Memo || '').toLowerCase();
+        const sessionPrice = this.estimateSessionPriceFromRules(rules, memo);
+        if (sessionPrice > 0 && newInvoice.totalAmount > 0) {
+          newInvoice.totalSessions = Math.round(newInvoice.totalAmount / sessionPrice);
+        }
+        
+        invoiceVerifications.push(newInvoice);
+      }
+    }
+  }
+
+  /**
+   * ESTIMATE SESSION PRICE FROM RULES - Helper method
+   */
+  private estimateSessionPriceFromRules(rules: any[], memo: string): number {
+    if (!rules || rules.length === 0 || !memo) return 0;
+
+    // Try to find a matching rule based on memo content
+    for (const rule of rules) {
+      const packageName = String(rule.package_name || '').toLowerCase();
+      const attendanceAlias = String(rule.attendance_alias || '').toLowerCase();
+      const paymentMemoAlias = String(rule.payment_memo_alias || '').toLowerCase();
+      const unitPrice = Number(rule.unit_price || 0);
+
+      if (unitPrice > 0 && (
+        memo.includes(packageName) || 
+        memo.includes(attendanceAlias) || 
+        memo.includes(paymentMemoAlias)
+      )) {
+        return unitPrice;
+      }
+    }
+
+    // Fallback: use average unit price from all rules
+    const validPrices = rules
+      .map(r => Number(r.unit_price || 0))
+      .filter(p => p > 0);
+
+    if (validPrices.length > 0) {
+      return validPrices.reduce((sum, price) => sum + price, 0) / validPrices.length;
+    }
+
+    return 0;
   }
 
   /**
