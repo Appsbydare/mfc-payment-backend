@@ -1,5 +1,6 @@
 const express = require('express');
 const { attendanceVerificationService } = require('../dist/services/attendanceVerificationService');
+const { invoiceVerificationService } = require('./invoiceVerificationService');
 
 const router = express.Router();
 
@@ -174,6 +175,38 @@ router.post('/rewrite', async (req, res) => {
   } catch (error) {
     console.error('Error rewriting master sheet:', error);
     res.status(500).json({ success: false, error: error?.message || 'Rewrite failed' });
+  }
+});
+
+// Invoice Verification routes
+router.get('/invoices', async (req, res) => {
+  try {
+    const invoices = await invoiceVerificationService.loadInvoiceVerificationData();
+    res.json({ success: true, data: invoices });
+  } catch (error) {
+    console.error('Error loading invoice verification data:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to load invoice verification data' });
+  }
+});
+
+router.post('/invoices/initialize', async (req, res) => {
+  try {
+    const invoices = await invoiceVerificationService.initializeInvoiceVerification();
+    await invoiceVerificationService.saveInvoiceVerificationData(invoices);
+    res.json({ success: true, message: 'Invoice verification data initialized successfully', data: invoices });
+  } catch (error) {
+    console.error('Error initializing invoice verification data:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to initialize invoice verification data' });
+  }
+});
+
+router.delete('/invoices', async (req, res) => {
+  try {
+    await invoiceVerificationService.saveInvoiceVerificationData([]);
+    res.json({ success: true, message: 'Invoice verification data cleared successfully' });
+  } catch (error) {
+    console.error('Error clearing invoice verification data:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to clear invoice verification data' });
   }
 });
 
