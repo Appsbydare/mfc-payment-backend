@@ -1473,6 +1473,11 @@ export class AttendanceVerificationService {
 
     const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
     console.log(`📊 Found ${activeDiscounts.length} active discounts`);
+    console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
+    
+    // Debug: Show sample payment memos
+    const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
+    console.log(`📋 Sample payment memos:`, sampleMemos);
 
     // Process each master row individually
     const updated = master.map(row => {
@@ -1492,16 +1497,31 @@ export class AttendanceVerificationService {
       const memo = String(paymentRecord.Memo || '').trim();
       console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
 
-      // Look for discount name in memo (exact matching)
+      // Look for discount name in memo (flexible matching)
       let matchingDiscount: any = null;
       for (const discount of activeDiscounts) {
         const discountName = String(discount.name || '').trim();
         if (!discountName) continue;
 
-        // Exact match with discount name in memo
+        // Try exact match first
         if (memo === discountName) {
           matchingDiscount = discount;
           console.log(`✅ EXACT discount match found for invoice ${invoice}: "${discountName}"`);
+          break;
+        }
+
+        // Try case-insensitive match
+        if (memo.toLowerCase() === discountName.toLowerCase()) {
+          matchingDiscount = discount;
+          console.log(`✅ CASE-INSENSITIVE discount match found for invoice ${invoice}: "${discountName}"`);
+          break;
+        }
+
+        // Try partial match (memo contains discount name or vice versa)
+        if (memo.toLowerCase().includes(discountName.toLowerCase()) || 
+            discountName.toLowerCase().includes(memo.toLowerCase())) {
+          matchingDiscount = discount;
+          console.log(`✅ PARTIAL discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
           break;
         }
       }
@@ -1557,6 +1577,11 @@ export class AttendanceVerificationService {
 
     const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
     console.log(`📊 Found ${activeDiscounts.length} active discounts`);
+    console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
+    
+    // Debug: Show sample payment memos
+    const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
+    console.log(`📋 Sample payment memos:`, sampleMemos);
 
     // Process each master row individually
     const updated = masterData.map(row => {
@@ -1576,16 +1601,31 @@ export class AttendanceVerificationService {
       const memo = String(paymentRecord.Memo || '').trim();
       console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
 
-      // Look for discount name in memo (exact matching)
+      // Look for discount name in memo (flexible matching)
       let matchingDiscount: any = null;
       for (const discount of activeDiscounts) {
         const discountName = String(discount.name || '').trim();
         if (!discountName) continue;
 
-        // Exact match with discount name in memo
+        // Try exact match first
         if (memo === discountName) {
           matchingDiscount = discount;
           console.log(`✅ EXACT discount match found for invoice ${invoice}: "${discountName}"`);
+          break;
+        }
+
+        // Try case-insensitive match
+        if (memo.toLowerCase() === discountName.toLowerCase()) {
+          matchingDiscount = discount;
+          console.log(`✅ CASE-INSENSITIVE discount match found for invoice ${invoice}: "${discountName}"`);
+          break;
+        }
+
+        // Try partial match (memo contains discount name or vice versa)
+        if (memo.toLowerCase().includes(discountName.toLowerCase()) || 
+            discountName.toLowerCase().includes(memo.toLowerCase())) {
+          matchingDiscount = discount;
+          console.log(`✅ PARTIAL discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
           break;
         }
       }
