@@ -220,9 +220,9 @@ export class AttendanceVerificationService {
         }
       }
       
-      // STEP 4: Apply discounts based on invoice numbers
-      console.log('📋 Step 4: Applying discounts...');
-      const finalMasterRows = this.applyDiscountsByInvoice(masterRows, discounts);
+      // STEP 4: Apply discounts based on invoice numbers and memo matching
+      console.log('📋 Step 4: Applying discounts using memo-based matching...');
+      const finalMasterRows = this.applyDiscountsByInvoice(masterRows, discounts, payments);
       
       // STEP 5: Save updated invoice verification data
       console.log('📋 Step 5: Saving updated invoice verification data...');
@@ -1457,67 +1457,76 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * NEW DISCOUNT APPLICATION - Apply discounts by invoice number and memo matching
+   * ENHANCED DISCOUNT APPLICATION - Apply discounts by invoice number and memo matching
    */
   private applyDiscountsByInvoice(
     master: AttendanceVerificationMasterRow[],
-    discounts: any[]
+    discounts: any[],
+    payments: PaymentRecord[]
   ): AttendanceVerificationMasterRow[] {
-    if (!discounts || discounts.length === 0) return master;
-
-    console.log(`🔍 Applying discounts to ${master.length} records`);
-
-    // Build invoice -> discount mapping
-    const invoiceToDiscount = new Map<string, { name: string; pct: number }>();
-
-    const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
-
-    // For each master row with an invoice number, check if there's a matching discount
-    for (const row of master) {
-      const invoice = String(row.invoiceNumber || '').trim();
-      if (!invoice) continue;
-
-      // Find matching discount for this invoice
-      for (const discount of activeDiscounts) {
-        const code = String(discount.discount_code || discount.name || '').trim();
-        if (!code) continue;
-
-        // Check if invoice number matches discount code
-        if (invoice.includes(code) || code.includes(invoice)) {
-          const pct = Number(discount.applicable_percentage || 0) || 0;
-          invoiceToDiscount.set(invoice, { name: String(discount.name || code), pct });
-          console.log(`✅ Discount found for invoice ${invoice}: ${discount.name} (${pct}%)`);
-          break;
-        }
-      }
-    }
-
-    if (invoiceToDiscount.size === 0) {
-      console.log(`⚠️ No discounts applied - no matching invoice numbers found`);
+    if (!discounts || discounts.length === 0) {
+      console.log(`⚠️ No discounts available to apply`);
       return master;
     }
 
-    // Apply discounts to master rows
+    console.log(`🔍 Applying discounts to ${master.length} records using memo-based matching`);
+
+    const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+    console.log(`📊 Found ${activeDiscounts.length} active discounts`);
+
+    // Process each master row individually
     const updated = master.map(row => {
-      const inv = String(row.invoiceNumber || '').trim();
-      if (!inv) return row;
-      
-      const found = invoiceToDiscount.get(inv);
-      if (!found) return row;
+      const invoice = String(row.invoiceNumber || '').trim();
+      if (!invoice) {
+        console.log(`⚠️ No invoice number for ${row.customerName}, skipping discount`);
+        return row;
+      }
 
-      const factor = 1 - (Number(found.pct) || 0) / 100;
-      const newDiscountedSessionPrice = this.round2(row.sessionPrice * factor);
+      // Find the payment record for this invoice
+      const paymentRecord = payments.find(p => p.Invoice === invoice);
+      if (!paymentRecord) {
+        console.log(`⚠️ No payment record found for invoice ${invoice}, skipping discount`);
+        return row;
+      }
 
-      console.log(`💰 Applying discount to ${row.customerName}: ${found.name} (${found.pct}%) - Session Price: ${row.sessionPrice} → ${newDiscountedSessionPrice}`);
+      const memo = String(paymentRecord.Memo || '').trim();
+      console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
 
-      // Recalculate amounts with discounted session price
-      const amounts = this.calculateAmounts(newDiscountedSessionPrice, null, 'group'); // Use default percentages
+      // Look for discount name in memo (exact matching)
+      let matchingDiscount: any = null;
+      for (const discount of activeDiscounts) {
+        const discountName = String(discount.name || '').trim();
+        if (!discountName) continue;
+
+        // Exact match with discount name in memo
+        if (memo === discountName) {
+          matchingDiscount = discount;
+          console.log(`✅ EXACT discount match found for invoice ${invoice}: "${discountName}"`);
+          break;
+        }
+      }
+
+      if (!matchingDiscount) {
+        console.log(`❌ No discount match found for invoice ${invoice} with memo "${memo}"`);
+        return row;
+      }
+
+      // Apply the discount
+      const discountPercentage = Number(matchingDiscount.applicable_percentage || 0);
+      const discountFactor = 1 - (discountPercentage / 100);
+      const discountedSessionPrice = this.round2(row.sessionPrice * discountFactor);
+
+      console.log(`💰 Applying discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%)`);
+      console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
+
+      // Recalculate all amounts with discounted session price
+      const amounts = this.calculateAmounts(discountedSessionPrice, null, 'group');
 
       return {
         ...row,
-        discount: found.name,
-        discountPercentage: found.pct,
-        discountedSessionPrice: newDiscountedSessionPrice,
+        discount: matchingDiscount.name,
+        discountPercentage: discountPercentage,
+        discountedSessionPrice: discountedSessionPrice,
         coachAmount: this.round2(amounts.coach),
         bgmAmount: this.round2(amounts.bgm),
         managementAmount: this.round2(amounts.management),
@@ -1525,7 +1534,9 @@ export class AttendanceVerificationService {
       };
     });
 
-    console.log(`✅ Applied discounts to ${updated.filter(r => r.discount).length} records`);
+    const discountAppliedCount = updated.filter(r => r.discount && r.discountPercentage > 0).length;
+    console.log(`✅ Applied discounts to ${discountAppliedCount} records`);
+    
     return updated;
   }
 
