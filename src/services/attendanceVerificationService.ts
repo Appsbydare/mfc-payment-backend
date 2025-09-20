@@ -1541,6 +1541,125 @@ export class AttendanceVerificationService {
   }
 
   /**
+   * APPLY DISCOUNTS TO MASTER DATA - Step 1: Add discount information
+   */
+  async applyDiscountsToMasterData(
+    masterData: AttendanceVerificationMasterRow[],
+    discounts: any[],
+    payments: PaymentRecord[]
+  ): Promise<AttendanceVerificationMasterRow[]> {
+    console.log(`🔍 Applying discounts to ${masterData.length} master records`);
+    
+    if (!discounts || discounts.length === 0) {
+      console.log(`⚠️ No discounts available to apply`);
+      return masterData;
+    }
+
+    const activeDiscounts = discounts.filter((d: any) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+    console.log(`📊 Found ${activeDiscounts.length} active discounts`);
+
+    // Process each master row individually
+    const updated = masterData.map(row => {
+      const invoice = String(row.invoiceNumber || '').trim();
+      if (!invoice) {
+        console.log(`⚠️ No invoice number for ${row.customerName}, skipping discount`);
+        return row;
+      }
+
+      // Find the payment record for this invoice
+      const paymentRecord = payments.find(p => p.Invoice === invoice);
+      if (!paymentRecord) {
+        console.log(`⚠️ No payment record found for invoice ${invoice}, skipping discount`);
+        return row;
+      }
+
+      const memo = String(paymentRecord.Memo || '').trim();
+      console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
+
+      // Look for discount name in memo (exact matching)
+      let matchingDiscount: any = null;
+      for (const discount of activeDiscounts) {
+        const discountName = String(discount.name || '').trim();
+        if (!discountName) continue;
+
+        // Exact match with discount name in memo
+        if (memo === discountName) {
+          matchingDiscount = discount;
+          console.log(`✅ EXACT discount match found for invoice ${invoice}: "${discountName}"`);
+          break;
+        }
+      }
+
+      if (!matchingDiscount) {
+        console.log(`❌ No discount match found for invoice ${invoice} with memo "${memo}"`);
+        return row;
+      }
+
+      // Apply discount information (without recalculating amounts yet)
+      const discountPercentage = Number(matchingDiscount.applicable_percentage || 0);
+      
+      console.log(`💰 Adding discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%)`);
+
+      return {
+        ...row,
+        discount: matchingDiscount.name,
+        discountPercentage: discountPercentage,
+        // Keep original amounts for now - will be recalculated in step 2
+        discountedSessionPrice: row.sessionPrice, // Will be updated in step 2
+        coachAmount: row.coachAmount,
+        bgmAmount: row.bgmAmount,
+        managementAmount: row.managementAmount,
+        mfcAmount: row.mfcAmount
+      };
+    });
+
+    const discountAppliedCount = updated.filter(r => r.discount && r.discountPercentage > 0).length;
+    console.log(`✅ Added discount information to ${discountAppliedCount} records`);
+    
+    return updated;
+  }
+
+  /**
+   * RECALCULATE DISCOUNTED AMOUNTS - Step 2: Recalculate amounts with discounted prices
+   */
+  async recalculateDiscountedAmounts(
+    masterData: AttendanceVerificationMasterRow[]
+  ): Promise<AttendanceVerificationMasterRow[]> {
+    console.log(`💰 Recalculating amounts for ${masterData.length} master records`);
+    
+    const updated = masterData.map(row => {
+      // Only recalculate if discount is applied
+      if (!row.discount || row.discountPercentage <= 0) {
+        return row;
+      }
+
+      const discountPercentage = row.discountPercentage;
+      const discountFactor = 1 - (discountPercentage / 100);
+      const discountedSessionPrice = this.round2(row.sessionPrice * discountFactor);
+
+      console.log(`💰 Recalculating ${row.customerName}: ${row.discount} (${discountPercentage}%)`);
+      console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
+
+      // Recalculate all amounts with discounted session price
+      const amounts = this.calculateAmounts(discountedSessionPrice, null, 'group');
+
+      return {
+        ...row,
+        discountedSessionPrice: discountedSessionPrice,
+        coachAmount: this.round2(amounts.coach),
+        bgmAmount: this.round2(amounts.bgm),
+        managementAmount: this.round2(amounts.management),
+        mfcAmount: this.round2(amounts.mfc)
+      };
+    });
+
+    const recalculatedCount = updated.filter(r => r.discount && r.discountPercentage > 0).length;
+    console.log(`✅ Recalculated amounts for ${recalculatedCount} discounted records`);
+    
+    return updated;
+  }
+
+  /**
    * OLD DISCOUNT APPLICATION - Keep for reference
    */
   private applyDiscountsFromPayments(

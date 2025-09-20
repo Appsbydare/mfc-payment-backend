@@ -102,6 +102,103 @@ router.post('/verify', async (req, res) => {
 });
 
 /**
+ * @desc    Add discounts to verified data (Step 1)
+ * @route   POST /api/attendance-verification/add-discounts
+ * @access  Private
+ */
+router.post('/add-discounts', async (req, res) => {
+  try {
+    console.log('🔍 Starting Add Discounts process...');
+    
+    // Load current master data
+    const masterData = await attendanceVerificationService.loadExistingMasterData();
+    if (masterData.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No verified data found. Please run verification first.'
+      });
+    }
+    
+    // Load payments and discounts data
+    const { payments, discounts } = await attendanceVerificationService['loadAllData']();
+    
+    // Apply discounts to master data
+    const updatedMasterData = await attendanceVerificationService['applyDiscountsToMasterData'](masterData, discounts, payments);
+    
+    // Save updated master data
+    await attendanceVerificationService.saveMasterData(updatedMasterData);
+    
+    const discountAppliedCount = updatedMasterData.filter(r => r.discount && r.discountPercentage > 0).length;
+    
+    console.log(`✅ Add Discounts complete: ${discountAppliedCount} records updated with discounts`);
+    
+    res.json({
+      success: true,
+      message: `Discounts added to ${discountAppliedCount} records`,
+      data: updatedMasterData,
+      summary: {
+        totalRecords: updatedMasterData.length,
+        discountAppliedCount: discountAppliedCount
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('Error adding discounts:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to add discounts'
+    });
+  }
+});
+
+/**
+ * @desc    Recalculate amounts with discounted prices (Step 2)
+ * @route   POST /api/attendance-verification/recalculate-discounts
+ * @access  Private
+ */
+router.post('/recalculate-discounts', async (req, res) => {
+  try {
+    console.log('💰 Starting Recalculate Discounts process...');
+    
+    // Load current master data
+    const masterData = await attendanceVerificationService.loadExistingMasterData();
+    if (masterData.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No verified data found. Please run verification first.'
+      });
+    }
+    
+    // Recalculate amounts for records with discounts
+    const updatedMasterData = await attendanceVerificationService['recalculateDiscountedAmounts'](masterData);
+    
+    // Save updated master data
+    await attendanceVerificationService.saveMasterData(updatedMasterData);
+    
+    const recalculatedCount = updatedMasterData.filter(r => r.discount && r.discountPercentage > 0).length;
+    
+    console.log(`✅ Recalculate Discounts complete: ${recalculatedCount} records recalculated`);
+    
+    res.json({
+      success: true,
+      message: `Amounts recalculated for ${recalculatedCount} discounted records`,
+      data: updatedMasterData,
+      summary: {
+        totalRecords: updatedMasterData.length,
+        recalculatedCount: recalculatedCount
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('Error recalculating discounts:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to recalculate discounts'
+    });
+  }
+});
+
+/**
  * @desc    Get verification summary statistics
  * @route   GET /api/attendance-verification/summary
  * @access  Private
