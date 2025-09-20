@@ -413,7 +413,7 @@ export class AttendanceVerificationService {
         console.log(`❌ Package cannot be found in rules: "${membershipName}" (${sessionType})`);
         verificationStatus = 'Package Cannot be found';
         
-        // Still use enhanced invoice selection even without rule
+        // Still use enhanced invoice selection even without rule (for tracking purposes)
         const invoiceResult = await this.useInvoiceForSession(
           customerName,
           Number(matchingPayment.Amount || 0), // Use payment amount as session price
@@ -427,6 +427,8 @@ export class AttendanceVerificationService {
         invoiceNumber = invoiceResult.usedInvoiceNumber;
         amount = invoiceResult.usedAmount;
         paymentDate = invoiceResult.usedPaymentDate;
+        
+        console.log(`📋 Package cannot be found but invoice tracking maintained: Invoice=${invoiceNumber}`);
       } else {
         console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
         
@@ -453,19 +455,47 @@ export class AttendanceVerificationService {
       verificationStatus = 'Not Verified';
     }
     
-    // STEP 4: Get rule for calculations (even if not found, use defaults)
+    // STEP 4: Get rule for calculations (only if verification is successful)
     const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
-    const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
+    let rule: any = null;
+    let packagePrice = 0;
+    let sessionPrice = 0;
+    let amounts = {
+      coach: 0,
+      bgm: 0,
+      management: 0,
+      mfc: 0
+    };
     
-    // STEP 5: Get prices from rules or use payment amount
-    const packagePrice = rule ? this.round2(Number(rule.price || 0)) : 0;
-    const sessionPrice = rule ? this.round2(Number(rule.unit_price || 0)) : amount;
+    // Only calculate prices and amounts if verification is successful
+    if (verificationStatus === 'Verified') {
+      rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
+      
+      if (rule) {
+        // STEP 5: Get prices from rules
+        packagePrice = this.round2(Number(rule.price || 0));
+        sessionPrice = this.round2(Number(rule.unit_price || 0));
+        
+        // STEP 6: Calculate discounted session price (for calculations only)
+        const discountedSessionPrice = sessionPrice; // Will be updated by discount application later
+        
+        // STEP 7: Calculate amounts using discounted session price
+        amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
+      } else {
+        console.log(`⚠️ Rule not found for calculations, setting all amounts to 0`);
+        packagePrice = 0;
+        sessionPrice = 0;
+        amounts = { coach: 0, bgm: 0, management: 0, mfc: 0 };
+      }
+    } else {
+      console.log(`⚠️ Verification status is "${verificationStatus}", setting all amounts to 0`);
+      packagePrice = 0;
+      sessionPrice = 0;
+      amounts = { coach: 0, bgm: 0, management: 0, mfc: 0 };
+    }
     
-    // STEP 6: Calculate discounted session price (for calculations only)
+    // STEP 6: Calculate discounted session price (for display purposes)
     const discountedSessionPrice = sessionPrice; // Will be updated by discount application later
-    
-    // STEP 7: Calculate amounts using discounted session price
-    const amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
     
     // Generate unique key
     const uniqueKey = this.generateUniqueKey(attendance);
