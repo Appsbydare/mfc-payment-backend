@@ -96,12 +96,26 @@ export class AttendanceVerificationService {
       
       // STEP 1: Initialize Invoice Verification System
       console.log('📋 Step 1: Initializing invoice verification system...');
-      let invoiceVerifications = await invoiceVerificationService.loadInvoiceVerificationData();
+      let invoiceVerifications: InvoiceVerification[] = [];
+      
+      try {
+        invoiceVerifications = await invoiceVerificationService.loadInvoiceVerificationData();
+        console.log(`📊 Loaded ${invoiceVerifications.length} existing invoice verification records`);
+      } catch (error: any) {
+        console.log('⚠️ Error loading invoice verification data:', error.message);
+        invoiceVerifications = [];
+      }
       
       if (invoiceVerifications.length === 0) {
         console.log('🆕 No existing invoice data found, initializing from payments...');
-        invoiceVerifications = await invoiceVerificationService.initializeInvoiceVerification();
-        await invoiceVerificationService.saveInvoiceVerificationData(invoiceVerifications);
+        try {
+          invoiceVerifications = await invoiceVerificationService.initializeInvoiceVerification();
+          await invoiceVerificationService.saveInvoiceVerificationData(invoiceVerifications);
+          console.log(`✅ Initialized ${invoiceVerifications.length} invoice verification records`);
+        } catch (error: any) {
+          console.error('❌ Error initializing invoice verification:', error);
+          throw new Error(`Failed to initialize invoice verification: ${error?.message || 'Unknown error'}`);
+        }
       }
       
       console.log(`📊 Loaded ${invoiceVerifications.length} invoice verification records`);

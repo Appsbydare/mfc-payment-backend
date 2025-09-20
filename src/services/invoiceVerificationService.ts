@@ -105,6 +105,19 @@ export class InvoiceVerificationService {
       console.log('📖 Loading existing invoice verification data...');
       const data = await googleSheetsService.readSheet(this.INVOICE_VERIFICATION_SHEET);
       
+      // Check if sheet is empty or has no data
+      if (!data || data.length === 0) {
+        console.log('📝 Invoice verification sheet is empty, will initialize');
+        return [];
+      }
+      
+      // Check if first row has headers (no numeric data in key columns)
+      const firstRow = data[0];
+      if (!firstRow || !firstRow['Invoice Number'] || !firstRow['Customer Name']) {
+        console.log('📝 Invoice verification sheet has no headers, will initialize');
+        return [];
+      }
+      
       return data.map(row => this.normalizeInvoiceVerificationRow(row));
     } catch (error) {
       console.log('📝 No existing invoice verification data found, will initialize');
@@ -134,7 +147,27 @@ export class InvoiceVerificationService {
         'Updated At': invoice.updatedAt
       }));
       
-      await googleSheetsService.writeSheet(this.INVOICE_VERIFICATION_SHEET, sheetData);
+      // If no data, create empty sheet with headers
+      if (sheetData.length === 0) {
+        console.log('📝 Creating empty invoice verification sheet with headers...');
+        const emptyData = [{
+          'Invoice Number': '',
+          'Customer Name': '',
+          'Total Amount': '',
+          'Used Amount': '',
+          'Remaining Balance': '',
+          'Status': '',
+          'Sessions Used': '',
+          'Total Sessions': '',
+          'Last Used Date': '',
+          'Created At': '',
+          'Updated At': ''
+        }];
+        await googleSheetsService.writeSheet(this.INVOICE_VERIFICATION_SHEET, emptyData);
+      } else {
+        await googleSheetsService.writeSheet(this.INVOICE_VERIFICATION_SHEET, sheetData);
+      }
+      
       console.log('✅ Invoice verification data saved successfully');
       
     } catch (error: any) {
