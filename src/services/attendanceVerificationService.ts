@@ -90,7 +90,7 @@ export class AttendanceVerificationService {
     toDate?: string;
     forceReverify?: boolean;
     clearExisting?: boolean;
-    skipWrite?: boolean; // NEW: Skip writing to Google Sheets
+    skipWrite?: boolean; // NEW: Skip writing to database
   } = {}): Promise<VerificationResult> {
     const startTime = Date.now();
     let processedCount = 0;
@@ -234,7 +234,7 @@ export class AttendanceVerificationService {
         console.log('📋 Step 6: Saving master verification data...');
         await this.saveMasterData(finalMasterRows);
       } else {
-        console.log('📋 Step 6: Skipping save to Google Sheets (batch mode)');
+        console.log('📋 Step 6: Skipping save to database (batch mode)');
       }
       
       // STEP 7: Calculate summary
@@ -260,12 +260,12 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Load existing master data from Google Sheets
+   * Load existing master data from database
    * TEMPORARILY DISABLED - Processing from scratch using raw data
    */
   async loadExistingMasterData(): Promise<AttendanceVerificationMasterRow[]> {
     try {
-      console.log('📋 Loading existing master data from Google Sheets...');
+      console.log('📋 Loading existing master data from database...');
       const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
       const masterData = data.map(row => this.normalizeMasterRow(row));
       console.log(`✅ Loaded ${masterData.length} existing master records`);
@@ -277,7 +277,7 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Clear all master data from Google Sheets
+   * Clear all master data from database
    */
   async clearMasterData(): Promise<void> {
     try {
@@ -292,7 +292,7 @@ export class AttendanceVerificationService {
 
   /**
    * BATCH VERIFICATION PROCESS - All steps in memory, single write at end
-   * This prevents multiple writes to Google Sheets and preserves discount data
+   * This prevents multiple writes to database and preserves discount data
    */
   async batchVerificationProcess(params: {
     fromDate?: string;
@@ -308,7 +308,7 @@ export class AttendanceVerificationService {
       console.log('📋 Step 1: Verifying payments (memory only)...');
       const verifyResult = await this.verifyAttendanceData({
         ...params,
-        skipWrite: true // Don't write to Google Sheets yet
+        skipWrite: true // Don't write to database yet
       });
       
       let masterData = verifyResult.masterRows;
@@ -327,10 +327,10 @@ export class AttendanceVerificationService {
       const recalculatedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
       console.log(`✅ Step 3: Amount recalculation completed - ${recalculatedCount} records recalculated`);
       
-      // STEP 4: Single write to Google Sheets
-      console.log('📋 Step 4: Writing final data to Google Sheets...');
+      // STEP 4: Single write to database
+      console.log('📋 Step 4: Writing final data to database...');
       await this.saveMasterData(masterData);
-      console.log('✅ Step 4: Data written to Google Sheets successfully');
+      console.log('✅ Step 4: Data written to database successfully');
       
       // Calculate final summary
       const summary = this.calculateSummary(masterData);
@@ -360,7 +360,7 @@ export class AttendanceVerificationService {
    */
   async loadExistingDataOnly(): Promise<AttendanceVerificationMasterRow[]> {
     try {
-      console.log('📋 Loading existing data from Google Sheets (read-only)...');
+      console.log('📋 Loading existing data from database (read-only)...');
       const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
       const masterData = data.map(row => this.normalizeMasterRow(row));
       console.log(`✅ Loaded ${masterData.length} existing records (read-only)`);
@@ -372,7 +372,7 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Load all required data from Google Sheets
+   * Load all required data from database
    */
   async loadAllData() {
     const [attendance, payments, rawRules, discounts] = await Promise.all([
@@ -1300,7 +1300,7 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Normalize master row data from Google Sheets
+   * Normalize master row data from database
    */
   private normalizeMasterRow(row: any): AttendanceVerificationMasterRow {
     const sessionPrice = parseFloat(row.sessionPrice || row['Session Price'] || '0');
@@ -1395,7 +1395,7 @@ export class AttendanceVerificationService {
   }
 
   /**
-   * Save master data to Google Sheets
+   * Save master data to database
    */
   async saveMasterData(rows: AttendanceVerificationMasterRow[]): Promise<void> {
     // Write as array of objects so the GoogleSheetsService can derive headers correctly
