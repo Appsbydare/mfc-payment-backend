@@ -471,13 +471,13 @@ router.delete('/master', async (req, res) => {
 });
 
 /**
- * @desc    Rewrite master sheet - COMPLETELY NEW IMPLEMENTATION
+ * @desc    Rewrite master sheet - USING SAME LOGIC AS VERIFY PAYMENT
  * @route   POST /api/attendance-verification/rewrite-master
  * @access  Private
  */
 router.post('/rewrite-master', async (req, res) => {
   try {
-    console.log('🔄 Starting COMPLETELY NEW rewrite master process...');
+    console.log('🔄 Starting rewrite master process using same logic as verify payment...');
     
     // Import Google Sheets service
     const { googleSheetsService } = await import('../services/googleSheets');
@@ -494,43 +494,41 @@ router.post('/rewrite-master', async (req, res) => {
     
     console.log(`📊 Found ${sheetData.length} rows in payment_calc_detail sheet`);
     
-    // Create headers based on the Google Sheet structure you showed me
-    const headers = [
-      'Customer Name',
-      'Event Starts', 
-      'Membership Name',
-      'Instructors',
-      'Status',
-      'Discount',
-      'Discount %',
-      'Verification Status',
-      'Invoice #',
-      'Amount',
-      'Payment Date',
-      'Package Price',
-      'Session Price',
-      'Discounted Session Price',
-      'Coach Amount',
-      'BGM Amount',
-      'Management Amount',
-      'MFC Amount',
-      'UniqueKey',
-      'CreatedAt',
-      'UpdatedAt'
-    ];
+    // Convert the raw sheet data to the same object format used by verify payment
+    // This ensures the data structure matches exactly what the verification process creates
+    const dataObjects = sheetData.map((row: any) => ({
+      'Customer Name': row['Customer Name'] || row['customerName'] || '',
+      'Event Starts At': row['Event Starts At'] || row['eventStartsAt'] || row['Event Starts'] || '',
+      'Membership Name': row['Membership Name'] || row['membershipName'] || '',
+      'Instructors': row['Instructors'] || row['instructors'] || '',
+      'Status': row['Status'] || row['status'] || '',
+      'Discount': row['Discount'] || row['discount'] || '',
+      'Discount %': row['Discount %'] || row['discountPercentage'] || 0,
+      'Verification Status': row['Verification Status'] || row['verificationStatus'] || '',
+      'Invoice #': row['Invoice #'] || row['invoiceNumber'] || '',
+      'Amount': row['Amount'] || row['amount'] || 0,
+      'Payment Date': row['Payment Date'] || row['paymentDate'] || '',
+      'Package Price': row['Package Price'] || row['packagePrice'] || 0,
+      'Session Price': row['Session Price'] || row['sessionPrice'] || 0,
+      'Discounted Session Price': row['Discounted Session Price'] || row['discountedSessionPrice'] || 0,
+      'Coach Amount': row['Coach Amount'] || row['coachAmount'] || 0,
+      'BGM Amount': row['BGM Amount'] || row['bgmAmount'] || 0,
+      'Management Amount': row['Management Amount'] || row['managementAmount'] || 0,
+      'MFC Amount': row['MFC Amount'] || row['mfcAmount'] || 0,
+      'UniqueKey': row['UniqueKey'] || row['uniqueKey'] || '',
+      'CreatedAt': row['CreatedAt'] || row['createdAt'] || new Date().toISOString(),
+      'UpdatedAt': row['UpdatedAt'] || row['updatedAt'] || new Date().toISOString()
+    }));
     
-    // Prepare data with headers
-    const dataToWrite = [headers, ...sheetData];
+    // Use the exact same method as the verification process
+    await googleSheetsService.writeSheet('payment_calc_detail', dataObjects);
     
-    // Write data back to the sheet
-    await googleSheetsService.writeSheet('payment_calc_detail', dataToWrite);
-    
-    console.log('✅ Master sheet rewritten successfully with proper headers');
+    console.log('✅ Master sheet rewritten successfully using same logic as verify payment');
     
     res.json({
       success: true,
-      message: `Master sheet rewritten successfully with ${sheetData.length} records`,
-      recordCount: sheetData.length
+      message: `Master sheet rewritten successfully with ${dataObjects.length} records`,
+      recordCount: dataObjects.length
     });
     
   } catch (error: any) {
