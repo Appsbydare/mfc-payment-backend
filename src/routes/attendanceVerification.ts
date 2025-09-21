@@ -471,6 +471,19 @@ router.delete('/master', async (req, res) => {
 });
 
 /**
+ * @desc    Test endpoint to check if rewrite-master route is accessible
+ * @route   GET /api/attendance-verification/test-rewrite
+ * @access  Private
+ */
+router.get('/test-rewrite', async (req, res) => {
+  res.json({
+    success: true,
+    message: 'Rewrite master route is accessible',
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
  * @desc    Rewrite master sheet - USING SAME LOGIC AS VERIFY PAYMENT
  * @route   POST /api/attendance-verification/rewrite-master
  * @access  Private
