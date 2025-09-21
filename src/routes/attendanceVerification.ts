@@ -471,83 +471,73 @@ router.delete('/master', async (req, res) => {
 });
 
 /**
- * @desc    Rewrite master sheet with verified data - NEW SIMPLE IMPLEMENTATION
+ * @desc    Rewrite master sheet - COMPLETELY NEW IMPLEMENTATION
  * @route   POST /api/attendance-verification/rewrite-master
  * @access  Private
  */
 router.post('/rewrite-master', async (req, res) => {
   try {
-    console.log('🔄 Starting rewrite master sheet process...');
+    console.log('🔄 Starting COMPLETELY NEW rewrite master process...');
     
-    // Get current master data from the sheet
+    // Import Google Sheets service
     const { googleSheetsService } = await import('../services/googleSheets');
-    const currentData = await googleSheetsService.readSheet('payment_calc_detail');
     
-    if (!currentData || currentData.length === 0) {
+    // Read current data from payment_calc_detail sheet
+    const sheetData = await googleSheetsService.readSheet('payment_calc_detail');
+    
+    if (!sheetData || sheetData.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'No data found in payment_calc_detail sheet. Please run verification first.'
       });
     }
     
-    console.log(`📊 Found ${currentData.length} records in payment_calc_detail sheet`);
+    console.log(`📊 Found ${sheetData.length} rows in payment_calc_detail sheet`);
     
-    // Simply write the same data back to ensure it's properly formatted
-    await googleSheetsService.writeSheet('payment_calc_detail', currentData);
+    // Create headers based on the Google Sheet structure you showed me
+    const headers = [
+      'Customer Name',
+      'Event Starts', 
+      'Membership Name',
+      'Instructors',
+      'Status',
+      'Discount',
+      'Discount %',
+      'Verification Status',
+      'Invoice #',
+      'Amount',
+      'Payment Date',
+      'Package Price',
+      'Session Price',
+      'Discounted Session Price',
+      'Coach Amount',
+      'BGM Amount',
+      'Management Amount',
+      'MFC Amount',
+      'UniqueKey',
+      'CreatedAt',
+      'UpdatedAt'
+    ];
     
-    console.log('✅ Master sheet rewritten successfully');
+    // Prepare data with headers
+    const dataToWrite = [headers, ...sheetData];
+    
+    // Write data back to the sheet
+    await googleSheetsService.writeSheet('payment_calc_detail', dataToWrite);
+    
+    console.log('✅ Master sheet rewritten successfully with proper headers');
     
     res.json({
       success: true,
-      message: `Master sheet rewritten successfully with ${currentData.length} records`,
-      recordCount: currentData.length
+      message: `Master sheet rewritten successfully with ${sheetData.length} records`,
+      recordCount: sheetData.length
     });
+    
   } catch (error: any) {
-    console.error('❌ Error rewriting master sheet:', error);
+    console.error('❌ Error in rewrite master:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to rewrite master sheet'
-    });
-  }
-});
-
-/**
- * @desc    Alternative rewrite endpoint - Simple data refresh
- * @route   POST /api/attendance-verification/refresh-data
- * @access  Private
- */
-router.post('/refresh-data', async (req, res) => {
-  try {
-    console.log('🔄 Starting data refresh process...');
-    
-    // Get current master data from the sheet
-    const { googleSheetsService } = await import('../services/googleSheets');
-    const currentData = await googleSheetsService.readSheet('payment_calc_detail');
-    
-    if (!currentData || currentData.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No data found in payment_calc_detail sheet. Please run verification first.'
-      });
-    }
-    
-    console.log(`📊 Found ${currentData.length} records in payment_calc_detail sheet`);
-    
-    // Write the data back to refresh the sheet
-    await googleSheetsService.writeSheet('payment_calc_detail', currentData);
-    
-    console.log('✅ Data refreshed successfully');
-    
-    res.json({
-      success: true,
-      message: `Data refreshed successfully with ${currentData.length} records`,
-      recordCount: currentData.length
-    });
-  } catch (error: any) {
-    console.error('❌ Error refreshing data:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to refresh data'
     });
   }
 });
