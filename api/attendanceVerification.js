@@ -178,6 +178,72 @@ router.post('/rewrite', async (req, res) => {
   }
 });
 
+// @desc Rewrite master sheet - USING SAME LOGIC AS VERIFY PAYMENT
+// @route POST /api/attendance-verification/rewrite-master
+router.post('/rewrite-master', async (req, res) => {
+  try {
+    console.log('🔄 Starting rewrite master process using same logic as verify payment...');
+    
+    // Import Google Sheets service
+    const { googleSheetsService } = require('../src/services/googleSheets');
+    
+    // Read current data from payment_calc_detail sheet
+    const sheetData = await googleSheetsService.readSheet('payment_calc_detail');
+    
+    if (!sheetData || sheetData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No data found in payment_calc_detail sheet. Please run verification first.'
+      });
+    }
+    
+    console.log(`📊 Found ${sheetData.length} rows in payment_calc_detail sheet`);
+    
+    // Convert the raw sheet data to the same object format used by verify payment
+    const dataObjects = sheetData.map((row) => ({
+      'Customer Name': row['Customer Name'] || row['customerName'] || '',
+      'Event Starts At': row['Event Starts At'] || row['eventStartsAt'] || row['Event Starts'] || '',
+      'Membership Name': row['Membership Name'] || row['membershipName'] || '',
+      'Instructors': row['Instructors'] || row['instructors'] || '',
+      'Status': row['Status'] || row['status'] || '',
+      'Discount': row['Discount'] || row['discount'] || '',
+      'Discount %': row['Discount %'] || row['discountPercentage'] || 0,
+      'Verification Status': row['Verification Status'] || row['verificationStatus'] || '',
+      'Invoice #': row['Invoice #'] || row['invoiceNumber'] || '',
+      'Amount': row['Amount'] || row['amount'] || 0,
+      'Payment Date': row['Payment Date'] || row['paymentDate'] || '',
+      'Package Price': row['Package Price'] || row['packagePrice'] || 0,
+      'Session Price': row['Session Price'] || row['sessionPrice'] || 0,
+      'Discounted Session Price': row['Discounted Session Price'] || row['discountedSessionPrice'] || 0,
+      'Coach Amount': row['Coach Amount'] || row['coachAmount'] || 0,
+      'BGM Amount': row['BGM Amount'] || row['bgmAmount'] || 0,
+      'Management Amount': row['Management Amount'] || row['managementAmount'] || 0,
+      'MFC Amount': row['MFC Amount'] || row['mfcAmount'] || 0,
+      'UniqueKey': row['UniqueKey'] || row['uniqueKey'] || '',
+      'CreatedAt': row['CreatedAt'] || row['createdAt'] || new Date().toISOString(),
+      'UpdatedAt': row['UpdatedAt'] || row['updatedAt'] || new Date().toISOString()
+    }));
+    
+    // Use the exact same method as the verification process
+    await googleSheetsService.writeSheet('payment_calc_detail', dataObjects);
+    
+    console.log('✅ Master sheet rewritten successfully using same logic as verify payment');
+    
+    res.json({
+      success: true,
+      message: `Master sheet rewritten successfully with ${dataObjects.length} records`,
+      recordCount: dataObjects.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in rewrite master:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to rewrite master sheet'
+    });
+  }
+});
+
 // Invoice Verification routes
 router.get('/invoices', async (req, res) => {
   try {
