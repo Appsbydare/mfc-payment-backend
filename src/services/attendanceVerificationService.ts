@@ -90,6 +90,7 @@ export class AttendanceVerificationService {
     toDate?: string;
     forceReverify?: boolean;
     clearExisting?: boolean;
+    skipWrite?: boolean; // NEW: Skip writing to Google Sheets
   } = {}): Promise<VerificationResult> {
     const startTime = Date.now();
     let processedCount = 0;
@@ -228,9 +229,13 @@ export class AttendanceVerificationService {
       console.log('📋 Step 5: Saving updated invoice verification data...');
       await invoiceVerificationService.saveInvoiceVerificationData(invoiceVerifications);
       
-      // STEP 6: Save master verification data to payment_calc_detail sheet
-      console.log('📋 Step 6: Saving master verification data...');
-      await this.saveMasterData(finalMasterRows);
+      // STEP 6: Save master verification data to payment_calc_detail sheet (only if not skipping write)
+      if (!params.skipWrite) {
+        console.log('📋 Step 6: Saving master verification data...');
+        await this.saveMasterData(finalMasterRows);
+      } else {
+        console.log('📋 Step 6: Skipping save to Google Sheets (batch mode)');
+      }
       
       // STEP 7: Calculate summary
       const summary = this.calculateSummary(finalMasterRows);
@@ -285,9 +290,86 @@ export class AttendanceVerificationService {
     }
   }
 
-  // OLD METHOD REMOVED - Using new simple implementation in routes
+  /**
+   * BATCH VERIFICATION PROCESS - All steps in memory, single write at end
+   * This prevents multiple writes to Google Sheets and preserves discount data
+   */
+  async batchVerificationProcess(params: {
+    fromDate?: string;
+    toDate?: string;
+    forceReverify?: boolean;
+    clearExisting?: boolean;
+  } = {}): Promise<VerificationResult> {
+    const startTime = Date.now();
+    console.log('🔄 Starting BATCH verification process (single write at end)...');
+    
+    try {
+      // STEP 1: Verify payments (in memory only)
+      console.log('📋 Step 1: Verifying payments (memory only)...');
+      const verifyResult = await this.verifyAttendanceData({
+        ...params,
+        skipWrite: true // Don't write to Google Sheets yet
+      });
+      
+      let masterData = verifyResult.masterRows;
+      console.log(`✅ Step 1: Payment verification completed - ${masterData.length} records processed`);
+      
+      // STEP 2: Apply discounts (in memory only)
+      console.log('📋 Step 2: Applying discounts (memory only)...');
+      const { payments, discounts } = await this.loadAllData();
+      masterData = await this.applyDiscountsToMasterData(masterData, discounts, payments);
+      const discountAppliedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
+      console.log(`✅ Step 2: Discount application completed - ${discountAppliedCount} records with discounts`);
+      
+      // STEP 3: Recalculate amounts (in memory only)
+      console.log('📋 Step 3: Recalculating amounts (memory only)...');
+      masterData = await this.recalculateDiscountedAmounts(masterData);
+      const recalculatedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
+      console.log(`✅ Step 3: Amount recalculation completed - ${recalculatedCount} records recalculated`);
+      
+      // STEP 4: Single write to Google Sheets
+      console.log('📋 Step 4: Writing final data to Google Sheets...');
+      await this.saveMasterData(masterData);
+      console.log('✅ Step 4: Data written to Google Sheets successfully');
+      
+      // Calculate final summary
+      const summary = this.calculateSummary(masterData);
+      const processingTime = Date.now() - startTime;
+      
+      console.log(`🎯 BATCH Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
+      console.log(`⏱️ Processing time: ${processingTime}ms`);
+      console.log(`📊 Final: ${masterData.length} records, ${discountAppliedCount} with discounts`);
+      
+      return {
+        masterRows: masterData,
+        summary: {
+          ...summary,
+          newRecordsAdded: verifyResult.summary.newRecordsAdded
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in batch verification process:', error);
+      throw new Error(`Batch verification failed: ${(error as any)?.message || 'Unknown error'}`);
+    }
+  }
 
-  // OLD METHOD REMOVED - Using new simple implementation in routes
+  /**
+   * READ-ONLY DATA LOADING - Load existing data without reprocessing
+   * This prevents overwriting discount data when just reading
+   */
+  async loadExistingDataOnly(): Promise<AttendanceVerificationMasterRow[]> {
+    try {
+      console.log('📋 Loading existing data from Google Sheets (read-only)...');
+      const data = await googleSheetsService.readSheet(this.MASTER_SHEET);
+      const masterData = data.map(row => this.normalizeMasterRow(row));
+      console.log(`✅ Loaded ${masterData.length} existing records (read-only)`);
+      return masterData;
+    } catch (error) {
+      console.log('📝 No existing data found');
+      return [];
+    }
+  }
 
   /**
    * Load all required data from Google Sheets

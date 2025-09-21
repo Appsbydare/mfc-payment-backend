@@ -6,7 +6,7 @@ import { googleSheetsService } from '../services/googleSheets';
 const router = express.Router();
 
 /**
- * @desc    Get attendance verification master data
+ * @desc    Get attendance verification master data (READ-ONLY)
  * @route   GET /api/attendance-verification/master
  * @access  Private
  */
@@ -14,15 +14,34 @@ router.get('/master', async (req, res) => {
   try {
     const { fromDate, toDate } = req.query;
     
-    const result = await attendanceVerificationService.verifyAttendanceData({
-      fromDate: fromDate as string,
-      toDate: toDate as string
-    });
+    // Use read-only method to avoid overwriting discount data
+    const masterData = await attendanceVerificationService.loadExistingDataOnly();
+    
+    // Filter by date range if provided
+    let filteredData = masterData;
+    if (fromDate || toDate) {
+      filteredData = masterData.filter(row => {
+        const rowDate = new Date(row.eventStartsAt);
+        if (fromDate && rowDate < new Date(fromDate as string)) return false;
+        if (toDate && rowDate > new Date(toDate as string)) return false;
+        return true;
+      });
+    }
+    
+    // Calculate summary
+    const summary = {
+      totalRecords: filteredData.length,
+      verifiedRecords: filteredData.filter(r => r.verificationStatus === 'Verified').length,
+      unverifiedRecords: filteredData.filter(r => r.verificationStatus !== 'Verified').length,
+      verificationRate: filteredData.length > 0 ? 
+        (filteredData.filter(r => r.verificationStatus === 'Verified').length / filteredData.length) * 100 : 0,
+      newRecordsAdded: 0
+    };
     
     res.json({
       success: true,
-      data: result.masterRows,
-      summary: result.summary
+      data: filteredData,
+      summary: summary
     });
   } catch (error: any) {
     console.error('Error loading master verification data:', error);
@@ -34,7 +53,42 @@ router.get('/master', async (req, res) => {
 });
 
 /**
- * @desc    Verify payments and update master table
+ * @desc    Batch verification process - All steps in memory, single write at end
+ * @route   POST /api/attendance-verification/batch-verify
+ * @access  Private
+ */
+router.post('/batch-verify', async (req, res) => {
+  try {
+    const { fromDate, toDate, forceReverify = true, clearExisting = false } = req.body;
+    
+    console.log('🔄 Starting batch verification process...');
+    
+    // Use the new batch processing method
+    const result = await attendanceVerificationService.batchVerificationProcess({
+      fromDate,
+      toDate,
+      forceReverify,
+      clearExisting
+    });
+    
+    res.json({
+      success: true,
+      message: `Batch verification complete. ${result.summary.newRecordsAdded || 0} new records processed.`,
+      data: result.masterRows,
+      summary: result.summary
+    });
+    
+  } catch (error: any) {
+    console.error('Error during batch verification:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Batch verification failed'
+    });
+  }
+});
+
+/**
+ * @desc    Verify payments and update master table (LEGACY - for backward compatibility)
  * @route   POST /api/attendance-verification/verify
  * @access  Private
  */
