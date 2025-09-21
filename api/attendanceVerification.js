@@ -150,9 +150,9 @@ router.get('/export', async (req, res) => {
       });
     }
     if (format === 'csv') {
-      const headers = ['Customer Name','Event Starts At','Membership Name','Instructors','Status','Discount','Discount %','Verification Status','Invoice #','Amount','Payment Date','Session Price','Coach Amount','BGM Amount','Management Amount','MFC Amount'];
+      const headers = ['Customer Name','Event Starts At','Membership Name','Instructors','Status','Discount','Discount %','Verification Status','Invoice #','Amount','Payment Date','Package Price','Session Price','Discounted Session Price','Coach Amount','BGM Amount','Management Amount','MFC Amount'];
       const csv = [headers.join(',')].concat(filtered.map(r => [
-        `"${r.customerName}"`,`"${r.eventStartsAt}"`,`"${r.membershipName}"`,`"${r.instructors}"`,`"${r.status}"`,`"${r.discount}"`,r.discountPercentage,`"${r.verificationStatus}"`,`"${r.invoiceNumber}"`,r.amount,`"${r.paymentDate}"`,r.sessionPrice,r.coachAmount,r.bgmAmount,r.managementAmount,r.mfcAmount
+        `"${r.customerName}"`,`"${r.eventStartsAt}"`,`"${r.membershipName}"`,`"${r.instructors}"`,`"${r.status}"`,`"${r.discount}"`,r.discountPercentage,`"${r.verificationStatus}"`,`"${r.invoiceNumber}"`,r.amount,`"${r.paymentDate}"`,r.packagePrice,r.sessionPrice,r.discountedSessionPrice,r.coachAmount,r.bgmAmount,r.managementAmount,r.mfcAmount
       ].join(','))).join('\n');
       res.setHeader('Content-Type','text/csv');
       res.setHeader('Content-Disposition',`attachment; filename="attendance_verification_${new Date().toISOString().split('T')[0]}.csv"`);
