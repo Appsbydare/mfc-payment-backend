@@ -56,6 +56,7 @@ const discountsRoutes = require('./discounts');
 const rulesRoutes = require('./rules');
 const reportsRoutes = require('./reports');
 const attendanceVerificationRoutes = require('./attendanceVerification');
+const coachesRoutes = require('./coaches');
 
 // API routes (mounted under /api/*)
 app.use('/api/auth', authRoutes);
@@ -65,6 +66,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/rules', rulesRoutes);
 app.use('/api/discounts', discountsRoutes);
 app.use('/api/attendance-verification', attendanceVerificationRoutes);
+app.use('/api/coaches', coachesRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
