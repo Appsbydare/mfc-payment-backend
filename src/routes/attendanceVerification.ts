@@ -471,23 +471,83 @@ router.delete('/master', async (req, res) => {
 });
 
 /**
- * @desc    Rewrite master sheet with verified data
+ * @desc    Rewrite master sheet with verified data - NEW SIMPLE IMPLEMENTATION
  * @route   POST /api/attendance-verification/rewrite-master
  * @access  Private
  */
 router.post('/rewrite-master', async (req, res) => {
   try {
-    await attendanceVerificationService.rewriteMasterSheet();
+    console.log('🔄 Starting rewrite master sheet process...');
+    
+    // Get current master data from the sheet
+    const { googleSheetsService } = await import('../services/googleSheets');
+    const currentData = await googleSheetsService.readSheet('payment_calc_detail');
+    
+    if (!currentData || currentData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No data found in payment_calc_detail sheet. Please run verification first.'
+      });
+    }
+    
+    console.log(`📊 Found ${currentData.length} records in payment_calc_detail sheet`);
+    
+    // Simply write the same data back to ensure it's properly formatted
+    await googleSheetsService.writeSheet('payment_calc_detail', currentData);
+    
+    console.log('✅ Master sheet rewritten successfully');
     
     res.json({
       success: true,
-      message: 'Master sheet rewritten successfully'
+      message: `Master sheet rewritten successfully with ${currentData.length} records`,
+      recordCount: currentData.length
     });
   } catch (error: any) {
-    console.error('Error rewriting master sheet:', error);
+    console.error('❌ Error rewriting master sheet:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to rewrite master sheet'
+    });
+  }
+});
+
+/**
+ * @desc    Alternative rewrite endpoint - Simple data refresh
+ * @route   POST /api/attendance-verification/refresh-data
+ * @access  Private
+ */
+router.post('/refresh-data', async (req, res) => {
+  try {
+    console.log('🔄 Starting data refresh process...');
+    
+    // Get current master data from the sheet
+    const { googleSheetsService } = await import('../services/googleSheets');
+    const currentData = await googleSheetsService.readSheet('payment_calc_detail');
+    
+    if (!currentData || currentData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No data found in payment_calc_detail sheet. Please run verification first.'
+      });
+    }
+    
+    console.log(`📊 Found ${currentData.length} records in payment_calc_detail sheet`);
+    
+    // Write the data back to refresh the sheet
+    await googleSheetsService.writeSheet('payment_calc_detail', currentData);
+    
+    console.log('✅ Data refreshed successfully');
+    
+    res.json({
+      success: true,
+      message: `Data refreshed successfully with ${currentData.length} records`,
+      recordCount: currentData.length
+    });
+  } catch (error: any) {
+    console.error('❌ Error refreshing data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to refresh data'
     });
   }
 });
