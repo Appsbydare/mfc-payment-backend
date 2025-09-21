@@ -292,15 +292,85 @@ export class AttendanceVerificationService {
     try {
       console.log('📝 Rewriting master sheet with verified data...');
       
-      // Get current verified data from memory (if any)
-      // For now, we'll just clear the sheet - the user needs to run verification first
-      await googleSheetsService.writeSheet(this.MASTER_SHEET, []);
+      // Get current verified data from the master sheet
+      const currentData = await this.loadExistingMasterData();
       
-      console.log('✅ Master sheet rewritten successfully');
+      if (currentData.length === 0) {
+        console.log('⚠️ No verified data found to rewrite. Please run verification first.');
+        throw new Error('No verified data found. Please run verification process first.');
+      }
+      
+      // Convert the data to the format expected by Google Sheets
+      const sheetData = this.convertMasterDataToSheetFormat(currentData);
+      
+      // Write the verified data back to the payment_calc_detail sheet
+      await googleSheetsService.writeSheet(this.MASTER_SHEET, sheetData);
+      
+      console.log(`✅ Master sheet rewritten successfully with ${currentData.length} verified records`);
     } catch (error) {
       console.error('❌ Error rewriting master sheet:', error);
       throw new Error(`Failed to rewrite master sheet: ${(error as any)?.message || 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Convert master data to Google Sheets format
+   */
+  private convertMasterDataToSheetFormat(data: AttendanceVerificationMasterRow[]): any[] {
+    if (data.length === 0) return [];
+    
+    // Get headers from the first row or create default headers
+    const headers = [
+      'Customer Name',
+      'Event Starts At',
+      'Membership Name',
+      'Instructors',
+      'Status',
+      'Discount',
+      'Discount Percentage',
+      'Verification Status',
+      'Invoice Number',
+      'Amount',
+      'Payment Date',
+      'Package Price',
+      'Session Price',
+      'Discounted Session Price',
+      'Coach Amount',
+      'BGM Amount',
+      'Management Amount',
+      'MFC Amount',
+      'Unique Key',
+      'Created At',
+      'Updated At'
+    ];
+    
+    // Convert data rows to sheet format
+    const rows = data.map(row => [
+      row.customerName,
+      row.eventStartsAt,
+      row.membershipName,
+      row.instructors,
+      row.status,
+      row.discount,
+      row.discountPercentage,
+      row.verificationStatus,
+      row.invoiceNumber,
+      row.amount,
+      row.paymentDate,
+      row.packagePrice,
+      row.sessionPrice,
+      row.discountedSessionPrice,
+      row.coachAmount,
+      row.bgmAmount,
+      row.managementAmount,
+      row.mfcAmount,
+      row.uniqueKey,
+      row.createdAt,
+      row.updatedAt
+    ]);
+    
+    // Return with headers as first row
+    return [headers, ...rows];
   }
 
   /**
