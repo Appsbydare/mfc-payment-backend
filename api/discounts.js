@@ -2,7 +2,7 @@ const express = require('express');
 const { google } = require('googleapis');
 const router = express.Router();
 
-// Minimal CORS for serverless route (helps when platform-level CORS misses preflight)
+// Minimal CORS for serverless route (helps when platform-level CORS misses preflight). Testing
 router.use((req, res, next) => {
   const origin = process.env.CORS_ORIGIN || 'https://mfc-payment-frontend.vercel.app';
   res.setHeader('Access-Control-Allow-Origin', origin);
