@@ -649,4 +649,112 @@ router.post('/test', async (req, res) => {
   }
 });
 
+// @desc Upsert provided rows into payment_calc_detail by UniqueKey; append new or update existing
+// @route POST /api/attendance-verification/upsert-master
+router.post('/upsert-master', async (req, res) => {
+  try {
+    const { rows } = req.body || {};
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No rows provided' });
+    }
+
+    console.log(`🔄 Upserting ${rows.length} row(s) to payment_calc_detail sheet`);
+
+    // Import Google Sheets service
+    const { googleSheetsService } = require('../src/services/googleSheets');
+
+    // Read existing data from payment_calc_detail sheet
+    const existing = await googleSheetsService.readSheet('payment_calc_detail');
+    console.log(`📊 Found ${existing.length} existing rows in sheet`);
+
+    // Create a map of existing rows by UniqueKey for efficient lookup
+    const existingMap = {};
+    existing.forEach((row, index) => {
+      const uniqueKey = row.UniqueKey || row.uniqueKey || '';
+      if (uniqueKey) {
+        existingMap[uniqueKey] = { ...row, _originalIndex: index };
+      }
+    });
+
+    // Process each row to upsert
+    const processedRows = [];
+    rows.forEach(row => {
+      const uniqueKey = row.uniqueKey || '';
+      if (!uniqueKey) {
+        console.warn('⚠️ Skipping row without uniqueKey:', row);
+        return;
+      }
+
+      // Convert row to sheet format
+      const sheetRow = {
+        'Customer Name': row.customerName || '',
+        'Event Starts At': row.eventStartsAt || '',
+        'Membership Name': row.membershipName || '',
+        'Instructors': row.instructors || '',
+        'Status': row.status || '',
+        'Discount': row.discount || '',
+        'Discount %': row.discountPercentage || 0,
+        'Verification Status': row.verificationStatus || '',
+        'Invoice #': row.invoiceNumber || '',
+        'Amount': row.amount || 0,
+        'Payment Date': row.paymentDate || '',
+        'Package Price': row.packagePrice || 0,
+        'Session Price': row.sessionPrice || 0,
+        'Discounted Session Price': row.discountedSessionPrice || 0,
+        'Coach Amount': row.coachAmount || 0,
+        'BGM Amount': row.bgmAmount || 0,
+        'Management Amount': row.managementAmount || 0,
+        'MFC Amount': row.mfcAmount || 0,
+        'UniqueKey': uniqueKey,
+        'CreatedAt': row.createdAt || new Date().toISOString(),
+        'UpdatedAt': new Date().toISOString(),
+        'Change History': row.changeHistory || ''
+      };
+
+      if (existingMap[uniqueKey]) {
+        console.log(`🔄 Updating existing row with UniqueKey: ${uniqueKey}`);
+        // Update existing row, preserve CreatedAt
+        sheetRow.CreatedAt = existingMap[uniqueKey].CreatedAt || existingMap[uniqueKey]['CreatedAt'] || sheetRow.CreatedAt;
+      } else {
+        console.log(`➕ Adding new row with UniqueKey: ${uniqueKey}`);
+      }
+
+      processedRows.push(sheetRow);
+    });
+
+    if (processedRows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid rows to process' });
+    }
+
+    // Merge with existing data: update existing rows and add new ones
+    const merged = [...existing];
+    processedRows.forEach(newRow => {
+      const uniqueKey = newRow.UniqueKey;
+      const existingIndex = existing.findIndex(row => 
+        (row.UniqueKey || row.uniqueKey) === uniqueKey
+      );
+      
+      if (existingIndex >= 0) {
+        // Update existing row
+        merged[existingIndex] = newRow;
+      } else {
+        // Add new row
+        merged.push(newRow);
+      }
+    });
+
+    console.log(`💾 Writing ${merged.length} total rows to payment_calc_detail sheet`);
+    await googleSheetsService.writeSheet('payment_calc_detail', merged);
+
+    return res.json({ 
+      success: true, 
+      message: `Upserted ${processedRows.length} row(s)`, 
+      recordCount: merged.length 
+    });
+  } catch (error) {
+    console.error('❌ Error in upsert-master:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to upsert master rows' });
+  }
+});
+
 module.exports = router;
