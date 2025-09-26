@@ -1333,7 +1333,12 @@ export class AttendanceVerificationService {
       bgmAmount: parseFloat(row.bgmAmount || row['BGM Amount'] || '0'),
       managementAmount: parseFloat(row.managementAmount || row['Management Amount'] || '0'),
       mfcAmount: parseFloat(row.mfcAmount || row['MFC Amount'] || '0'),
-      uniqueKey: row.uniqueKey || '',
+      uniqueKey: row.uniqueKey || row['UniqueKey'] || this.generateUniqueKey({
+        'Event Starts At': row.eventStartsAt || row['Event Starts At'] || '',
+        'Customer': row.customerName || row['Customer Name'] || '',
+        'Membership Name': row.membershipName || row['Membership Name'] || '',
+        'Instructors': row.instructors || row['Instructors'] || ''
+      } as any),
       createdAt: row.createdAt || '',
       updatedAt: row.updatedAt || ''
     };
