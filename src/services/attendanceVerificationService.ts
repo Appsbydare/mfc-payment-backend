@@ -1295,8 +1295,12 @@ export class AttendanceVerificationService {
     const customer = attendance.Customer || '';
     const membership = attendance['Membership Name'] || '';
     const instructors = attendance.Instructors || '';
+    const status = attendance.Status || '';
+    const classType = (attendance as any)['Class Type'] || (attendance as any).ClassType || attendance['Offering Type Name'] || '';
     
-    return `${date}_${customer}_${membership}_${instructors}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    // Include more fields to ensure uniqueness, especially for multiple sessions same day
+    const baseKey = `${date}_${customer}_${membership}_${instructors}_${status}_${classType}`;
+    return baseKey.replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   }
 
   /**
