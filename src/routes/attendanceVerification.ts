@@ -62,7 +62,48 @@ router.post('/batch-verify', async (req, res) => {
     const { fromDate, toDate, forceReverify = true, clearExisting = false } = req.body;
     
     console.log('🔄 Starting batch verification process...');
-    
+    // Gate: run only if there is new data in attendance or payments unless forceReverify
+    try {
+      const existingMaster = await attendanceVerificationService.loadExistingMasterData();
+      const { attendance, payments } = await attendanceVerificationService['loadAllData']();
+
+      // New attendance rows by UniqueKey
+      const existingKeys = new Set((existingMaster || []).map(r => r.uniqueKey));
+      const newAttendanceCount = (attendance || []).filter((att: any) => {
+        const uniqueKey = attendanceVerificationService['generateUniqueKey'](att);
+        return uniqueKey && !existingKeys.has(uniqueKey);
+      }).length;
+
+      // New payments by invoice number compared to invoice verification sheet
+      const existingInvoices = new Set(
+        (await invoiceVerificationService.loadInvoiceVerificationData()).map(inv => inv.invoiceNumber)
+      );
+      const newInvoiceCount = (payments || []).filter((p: any) => {
+        const inv = String(p.Invoice || '').trim();
+        return inv && !existingInvoices.has(inv);
+      }).length;
+
+      console.log(`📊 New attendance: ${newAttendanceCount}, new payments: ${newInvoiceCount}`);
+
+      if (!forceReverify && newAttendanceCount === 0 && newInvoiceCount === 0) {
+        return res.json({
+          success: true,
+          message: 'No new attendance or payments found. Skipping verification.',
+          data: existingMaster,
+          summary: {
+            totalRecords: existingMaster.length,
+            verifiedRecords: existingMaster.filter(r => r.verificationStatus === 'Verified').length,
+            unverifiedRecords: existingMaster.filter(r => r.verificationStatus !== 'Verified').length,
+            verificationRate: existingMaster.length > 0 ?
+              (existingMaster.filter(r => r.verificationStatus === 'Verified').length / existingMaster.length) * 100 : 0,
+            newRecordsAdded: 0
+          }
+        });
+      }
+    } catch (gateErr) {
+      console.warn('⚠️ Batch-verify gating check failed; proceeding anyway:', (gateErr as any)?.message);
+    }
+
     // Use the new batch processing method
     const result = await attendanceVerificationService.batchVerificationProcess({
       fromDate,
@@ -604,6 +645,82 @@ router.post('/rewrite-master', async (req, res) => {
       success: false,
       error: error.message || 'Failed to rewrite master sheet'
     });
+  }
+});
+
+/**
+ * @desc    Upsert provided rows into payment_calc_detail by UniqueKey; append new or update existing
+ * @route   POST /api/attendance-verification/upsert-master
+ * @access  Private
+ */
+router.post('/upsert-master', async (req, res) => {
+  try {
+    const { rows } = req.body || {};
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No rows provided' });
+    }
+
+    // Load existing master rows
+    const existing = await googleSheetsService.readSheet('payment_calc_detail');
+    const now = new Date().toISOString();
+
+    // Index existing by UniqueKey
+    const byKey = new Map<string, any>();
+    for (const r of existing) {
+      const key = String(r['UniqueKey'] || r['uniqueKey'] || '').trim();
+      if (key) byKey.set(key, { ...r });
+    }
+
+    // Normalize incoming rows (camelCase -> sheet headers)
+    const toSheetObject = (r: any) => ({
+      'Customer Name': r.customerName ?? r['Customer Name'] ?? '',
+      'Event Starts At': r.eventStartsAt ?? r['Event Starts At'] ?? '',
+      'Membership Name': r.membershipName ?? r['Membership Name'] ?? '',
+      'Instructors': r.instructors ?? r['Instructors'] ?? '',
+      'Status': r.status ?? r['Status'] ?? '',
+      'Discount': r.discount ?? r['Discount'] ?? '',
+      'Discount %': r.discountPercentage ?? r['Discount %'] ?? 0,
+      'Verification Status': (r.verificationStatus ?? r['Verification Status'] ?? ''),
+      'Invoice #': r.invoiceNumber ?? r['Invoice #'] ?? '',
+      'Amount': r.amount ?? r['Amount'] ?? 0,
+      'Payment Date': r.paymentDate ?? r['Payment Date'] ?? '',
+      'Package Price': r.packagePrice ?? r['Package Price'] ?? 0,
+      'Session Price': r.sessionPrice ?? r['Session Price'] ?? 0,
+      'Discounted Session Price': r.discountedSessionPrice ?? r['Discounted Session Price'] ?? 0,
+      'Coach Amount': r.coachAmount ?? r['Coach Amount'] ?? 0,
+      'BGM Amount': r.bgmAmount ?? r['BGM Amount'] ?? 0,
+      'Management Amount': r.managementAmount ?? r['Management Amount'] ?? 0,
+      'MFC Amount': r.mfcAmount ?? r['MFC Amount'] ?? 0,
+      'UniqueKey': r.uniqueKey ?? r['UniqueKey'] ?? '',
+      'Change History': r.changeHistory ?? r['Change History'] ?? '',
+      'CreatedAt': r.createdAt ?? r['CreatedAt'] ?? now,
+      'UpdatedAt': now
+    });
+
+    // Merge updates
+    for (const r of rows) {
+      const key = String(r.uniqueKey || r['UniqueKey'] || '').trim();
+      const incoming = toSheetObject(r);
+      if (!key) continue;
+      if (byKey.has(key)) {
+        const prev = byKey.get(key);
+        byKey.set(key, { ...prev, ...incoming, 'CreatedAt': prev['CreatedAt'] || incoming['CreatedAt'], 'UpdatedAt': now });
+      } else {
+        byKey.set(key, incoming);
+      }
+    }
+
+    // Preserve records that had no UniqueKey
+    const unchangedNoKey = existing.filter(r => !(String(r['UniqueKey'] || '').trim())).map(r => ({ ...r }));
+
+    const merged = [...Array.from(byKey.values()), ...unchangedNoKey];
+
+    await googleSheetsService.writeSheet('payment_calc_detail', merged);
+
+    return res.json({ success: true, message: `Upserted ${rows.length} row(s)`, recordCount: merged.length });
+  } catch (error: any) {
+    console.error('❌ Error in upsert-master:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to upsert master rows' });
   }
 });
 
