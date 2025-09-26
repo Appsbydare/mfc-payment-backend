@@ -49,7 +49,57 @@ router.post('/batch-verify', async (req, res) => {
   try {
     const { fromDate, toDate, forceReverify = true, clearExisting = false } = req.body || {};
     
-    console.log('🔄 Starting batch verification process...');
+    console.log('🔄 Starting batch verification process...', { forceReverify, clearExisting });
+    
+    // Gate: run only if there is new data in attendance or payments unless forceReverify
+    if (!forceReverify) {
+      try {
+        console.log('🔍 Checking for new data before verification...');
+        const existingMaster = await attendanceVerificationService.loadExistingMasterData();
+        const { attendance, payments } = await attendanceVerificationService.loadAllData();
+
+        // New attendance rows by UniqueKey
+        const existingKeys = new Set((existingMaster || []).map(r => r.uniqueKey));
+        const newAttendanceCount = (attendance || []).filter((att) => {
+          const uniqueKey = attendanceVerificationService.generateUniqueKey(att);
+          return uniqueKey && !existingKeys.has(uniqueKey);
+        }).length;
+
+        // New payments by invoice number compared to invoice verification sheet
+        const { invoiceVerificationService } = require('../dist/services/invoiceVerificationService');
+        const existingInvoices = new Set(
+          (await invoiceVerificationService.loadInvoiceVerificationData()).map(inv => inv.invoiceNumber)
+        );
+        const newInvoiceCount = (payments || []).filter((p) => {
+          const inv = String(p.Invoice || '').trim();
+          return inv && !existingInvoices.has(inv);
+        }).length;
+
+        console.log(`📊 New attendance: ${newAttendanceCount}, new payments: ${newInvoiceCount}`);
+
+        if (newAttendanceCount === 0 && newInvoiceCount === 0) {
+          return res.json({
+            success: true,
+            message: 'No new attendance or payments found. Skipping verification.',
+            data: existingMaster,
+            summary: {
+              totalRecords: existingMaster.length,
+              verifiedRecords: existingMaster.filter(r => r.verificationStatus === 'Verified').length,
+              unverifiedRecords: existingMaster.filter(r => r.verificationStatus !== 'Verified').length,
+              verificationRate: existingMaster.length > 0 ? 
+                (existingMaster.filter(r => r.verificationStatus === 'Verified').length / existingMaster.length) * 100 : 0,
+              newRecordsAdded: 0,
+              skippedReason: 'No new data to process'
+            }
+          });
+        }
+
+        console.log(`✅ Found new data, proceeding with verification...`);
+      } catch (gateError) {
+        console.error('❌ Error during new data check:', gateError);
+        // Continue with verification if gate check fails
+      }
+    }
     
     // Use the new batch processing method
     const result = await attendanceVerificationService.batchVerificationProcess({
