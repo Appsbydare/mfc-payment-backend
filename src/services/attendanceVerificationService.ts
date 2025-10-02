@@ -1,5 +1,5 @@
 import { googleSheetsService } from './googleSheets';
-import { invoiceVerificationService, InvoiceVerification } from './invoiceVerificationService';
+import { invoiceVerificationService } from './invoiceVerificationService';
 import { ruleService } from './ruleService';
 import { discountService } from './discountService';
 

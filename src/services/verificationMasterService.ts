@@ -1,6 +1,7 @@
 import { GoogleSheetsService } from './googleSheets';
 import { ruleService } from './ruleService';
 import { discountService, InvoiceDiscountData } from './discountService';
+import { invoiceVerificationService, InvoiceVerificationRecord } from './invoiceVerificationService';
 
 type SessionType = 'group' | 'private';
 
@@ -34,6 +35,11 @@ export interface MasterRow {
   BgmAmount: number;
   ManagementAmount: number;
   MfcAmount: number;
+
+  // Invoice verification fields
+  InvoiceVerificationStatus?: 'Available' | 'Partially Used' | 'Fully Used' | 'Unverified';
+  InvoiceRemainingBalance?: number;
+  InvoiceSessionsUsed?: number;
 
   LinkedPaymentIds?: string; // comma-separated payment ids if available
   RuleId?: string;
@@ -249,6 +255,41 @@ export class VerificationMasterService {
         discountData = all[0];
       }
 
+      // Invoice verification logic
+      let invoiceVerificationStatus: 'Available' | 'Partially Used' | 'Fully Used' | 'Unverified' = 'Available';
+      let invoiceRemainingBalance = 0;
+      let invoiceSessionsUsed = 0;
+
+      if (payment && payment.Invoice) {
+        try {
+          // Load existing invoice verification data
+          const existingInvoices = await invoiceVerificationService.loadInvoiceVerificationData();
+
+          // Find matching invoice record
+          const matchingInvoice = existingInvoices.find(inv =>
+            inv.invoiceNumber === payment.Invoice &&
+            this.normalizeCustomerName(inv.customerName) === this.normalizeCustomerName(a.Customer)
+          );
+
+          if (matchingInvoice) {
+            invoiceVerificationStatus = matchingInvoice.status;
+            invoiceRemainingBalance = matchingInvoice.remainingBalance;
+            invoiceSessionsUsed = matchingInvoice.sessionsUsed;
+
+            // If invoice has insufficient balance for this session, mark as unverified
+            if (invoiceRemainingBalance < chosen) {
+              invoiceVerificationStatus = 'Unverified';
+            }
+          } else {
+            // Invoice not found in verification records, treat as unverified
+            invoiceVerificationStatus = 'Unverified';
+          }
+        } catch (error) {
+          console.warn('Failed to load invoice verification data:', error);
+          invoiceVerificationStatus = 'Unverified';
+        }
+      }
+
       const effectiveAmount = typeof discountData?.effective_amount === 'number'
         ? discountData!.effective_amount
         : (payment ? parseFloat(payment.Amount || '0') : 0);
@@ -292,6 +333,11 @@ export class VerificationMasterService {
         BgmAmount: bgmAmount,
         ManagementAmount: managementAmount,
         MfcAmount: mfcAmount,
+
+        // Invoice verification fields
+        ...(invoiceVerificationStatus !== 'Available' ? { InvoiceVerificationStatus: invoiceVerificationStatus } : {}),
+        ...(invoiceRemainingBalance > 0 ? { InvoiceRemainingBalance: invoiceRemainingBalance } : {}),
+        ...(invoiceSessionsUsed > 0 ? { InvoiceSessionsUsed: invoiceSessionsUsed } : {}),
 
         LinkedPaymentIds: payment ? String(payment.Invoice || '') : '',
         RuleId: rule ? String(rule.id) : '',
