@@ -1,5 +1,5 @@
 import { googleSheetsService } from './googleSheets';
-import { invoiceVerificationService } from './invoiceVerificationService';
+import { invoiceVerificationService, InvoiceVerificationRecord } from './invoiceVerificationService';
 import { ruleService } from './ruleService';
 import { discountService } from './discountService';
 
@@ -111,7 +111,7 @@ export class AttendanceVerificationService {
       
       // STEP 1: Initialize Invoice Verification System
       console.log('📋 Step 1: Initializing invoice verification system...');
-      let invoiceVerifications: InvoiceVerification[] = [];
+      let invoiceVerifications: InvoiceVerificationRecord[] = [];
       
       try {
         invoiceVerifications = await invoiceVerificationService.loadInvoiceVerificationData();
@@ -446,8 +446,8 @@ export class AttendanceVerificationService {
     payments: PaymentRecord[],
     rules: any[],
     discounts: any[],
-    invoiceVerifications: InvoiceVerification[]
-  ): Promise<{ masterRow: AttendanceVerificationMasterRow; updatedInvoices: InvoiceVerification[] }> {
+    invoiceVerifications: InvoiceVerificationRecord[]
+  ): Promise<{ masterRow: AttendanceVerificationMasterRow; updatedInvoices: InvoiceVerificationRecord[] }> {
     
     // Normalize attendance data
     const customerName = this.getField(attendance as any, ['Customer Name','Customer']) || '';
@@ -843,10 +843,10 @@ export class AttendanceVerificationService {
     customerName: string,
     sessionPrice: number,
     sessionDate: string,
-    invoiceVerifications: InvoiceVerification[],
+    invoiceVerifications: InvoiceVerificationRecord[],
     payments: PaymentRecord[],
     rules: any[]
-  ): Promise<{ updatedInvoices: InvoiceVerification[]; usedInvoiceNumber: string; usedAmount: number; usedPaymentDate: string }> {
+  ): Promise<{ updatedInvoices: InvoiceVerificationRecord[]; usedInvoiceNumber: string; usedAmount: number; usedPaymentDate: string }> {
     
     console.log(`💰 Finding appropriate invoice for session (${sessionPrice}) on ${sessionDate} for customer ${customerName}`);
     
@@ -887,7 +887,7 @@ export class AttendanceVerificationService {
     const newRemainingBalance = this.round2(bestInvoice.remainingBalance - sessionPrice);
     const newSessionsUsed = bestInvoice.sessionsUsed + 1;
     
-    let newStatus: InvoiceVerification['status'] = 'Available';
+    let newStatus: InvoiceVerificationRecord['status'] = 'Available';
     if (newRemainingBalance <= 0) {
       newStatus = 'Fully Used';
     } else if (newUsedAmount > 0) {
@@ -932,10 +932,10 @@ export class AttendanceVerificationService {
     customerName: string,
     requiredAmount: number,
     sessionDate: string,
-    invoiceVerifications: InvoiceVerification[],
+    invoiceVerifications: InvoiceVerificationRecord[],
     payments: PaymentRecord[],
     rules: any[]
-  ): Promise<InvoiceVerification | null> {
+  ): Promise<InvoiceVerificationRecord | null> {
     
     const normalizedCustomer = this.normalizeCustomerName(customerName);
     
@@ -991,7 +991,7 @@ export class AttendanceVerificationService {
    */
   private async ensureAllInvoicesInVerification(
     customerName: string,
-    invoiceVerifications: InvoiceVerification[],
+    invoiceVerifications: InvoiceVerificationRecord[],
     payments: PaymentRecord[],
     rules: any[]
   ): Promise<void> {
@@ -1004,7 +1004,7 @@ export class AttendanceVerificationService {
         console.log(`🆕 Adding missing invoice to verification: ${payment.Invoice}`);
         
         // Create new invoice verification record
-        const newInvoice: InvoiceVerification = {
+        const newInvoice: InvoiceVerificationRecord = {
           invoiceNumber: payment.Invoice,
           customerName: customerName,
           totalAmount: Number(payment.Amount || 0),

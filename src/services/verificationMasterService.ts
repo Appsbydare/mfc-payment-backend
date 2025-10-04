@@ -276,10 +276,7 @@ export class VerificationMasterService {
             invoiceRemainingBalance = matchingInvoice.remainingBalance;
             invoiceSessionsUsed = matchingInvoice.sessionsUsed;
 
-            // If invoice has insufficient balance for this session, mark as unverified
-            if (invoiceRemainingBalance < chosen) {
-              invoiceVerificationStatus = 'Unverified';
-            }
+            // Invoice balance check moved after chosen calculation
           } else {
             // Invoice not found in verification records, treat as unverified
             invoiceVerificationStatus = 'Unverified';
@@ -295,6 +292,11 @@ export class VerificationMasterService {
         : (payment ? parseFloat(payment.Amount || '0') : 0);
 
       const chosen = sessionPrice > 0 ? sessionPrice : effectiveAmount;
+
+      // Check invoice balance after chosen is calculated
+      if (invoiceRemainingBalance < chosen) {
+        invoiceVerificationStatus = 'Unverified';
+      }
       const coachAmount = +((chosen || 0) * (pct.coach / 100)).toFixed(2);
       const bgmAmount = +((chosen || 0) * ((sessionType === 'group' ? pct.bgm : pct.bgm) / 100)).toFixed(2);
       const managementAmount = +((chosen || 0) * (pct.management / 100)).toFixed(2);
@@ -393,6 +395,13 @@ export class VerificationMasterService {
       return r;
     });
     await this.sheets.writeSheet(this.MASTER_SHEET, updated);
+  }
+
+  /**
+   * Normalize customer names for comparison
+   */
+  private normalizeCustomerName(customerName: string): string {
+    return String(customerName || '').trim().toLowerCase();
   }
 }
 

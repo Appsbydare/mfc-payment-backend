@@ -316,7 +316,7 @@ export class InvoiceVerificationService {
       if (invoice.invoiceNumber === invoiceNumber && invoice.remainingBalance > 0) {
         return {
           ...invoice,
-          status: 'Unverified',
+          status: 'Unverified' as const,
           updatedAt: new Date().toISOString()
         };
       }
