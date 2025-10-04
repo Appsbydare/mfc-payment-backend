@@ -62,9 +62,11 @@ export class InvoiceVerificationService {
         const customerName = this.normalizeCustomerName(invoicePayments[0].Customer || invoicePayments[0]['Customer']);
         const totalAmount = invoicePayments.reduce((sum, payment) => sum + Number(payment.Amount || 0), 0);
         const createdAt = invoicePayments.reduce((earliest, payment) => {
-          const paymentDate = new Date(payment.Date || payment.date);
-          return paymentDate < earliest ? paymentDate : earliest;
-        }, new Date(invoicePayments[0].Date || invoicePayments[0].date));
+          const paymentDateStr = payment.Date || payment.date;
+          const paymentDate = paymentDateStr ? new Date(paymentDateStr) : new Date();
+          const validEarliest = earliest && !isNaN(earliest.getTime()) ? earliest : new Date();
+          return paymentDate && !isNaN(paymentDate.getTime()) && paymentDate < validEarliest ? paymentDate : validEarliest;
+        }, null as Date | null) || new Date();
 
         const invoiceVerification: InvoiceVerificationRecord = {
           invoiceNumber,
@@ -83,7 +85,13 @@ export class InvoiceVerificationService {
         invoiceVerifications.push(invoiceVerification);
       }
 
-      invoiceVerifications.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      invoiceVerifications.sort((a, b) => {
+        const dateA = new Date(a.createdAt);
+        const dateB = new Date(b.createdAt);
+        const timeA = isNaN(dateA.getTime()) ? 0 : dateA.getTime();
+        const timeB = isNaN(dateB.getTime()) ? 0 : dateB.getTime();
+        return timeA - timeB;
+      });
       console.log(`✅ Created ${invoiceVerifications.length} invoice verification records`);
       return invoiceVerifications;
 

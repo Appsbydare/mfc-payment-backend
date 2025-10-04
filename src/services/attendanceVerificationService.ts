@@ -973,8 +973,10 @@ export class AttendanceVerificationService {
       
       const dateA = new Date(paymentA.Date);
       const dateB = new Date(paymentB.Date);
-      
-      return dateA.getTime() - dateB.getTime(); // Oldest first
+      const timeA = isNaN(dateA.getTime()) ? 0 : dateA.getTime();
+      const timeB = isNaN(dateB.getTime()) ? 0 : dateB.getTime();
+
+      return timeA - timeB; // Oldest first
     });
     
     console.log(`📋 Sorted available invoices for ${normalizedCustomer}: ${sortedInvoices.map(inv => `${inv.invoiceNumber}(${inv.remainingBalance})`).join(', ')}`);
