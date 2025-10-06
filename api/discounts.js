@@ -2,8 +2,7 @@ const express = require('express');
 const { google } = require('googleapis');
 const router = express.Router();
 
-// Minimal CORS for serverless route (helps when platform-level CORS misses preflight). Testing24
-
+// Minimal CORS for serverless route (helps when platform-level CORS misses preflight). Stable marker: e5177db-baseline
 router.use((req, res, next) => {
   const origin = process.env.CORS_ORIGIN || 'https://mfc-payment-frontend.vercel.app';
   res.setHeader('Access-Control-Allow-Origin', origin);
