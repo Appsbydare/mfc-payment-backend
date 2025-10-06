@@ -65,11 +65,32 @@ export class InvoiceVerificationService {
         // Calculate total amount for this invoice
         const totalAmount = invoicePayments.reduce((sum, payment) => sum + Number(payment.Amount || 0), 0);
         
-        // Get earliest payment date
+        // Get earliest payment date with proper validation
         const createdAt = invoicePayments.reduce((earliest, payment) => {
-          const paymentDate = new Date(payment.Date);
+          const paymentDateStr = payment.Date;
+          if (!paymentDateStr || paymentDateStr === '') return earliest;
+
+          const paymentDate = new Date(paymentDateStr);
+          if (isNaN(paymentDate.getTime())) {
+            console.warn(`⚠️ Invalid payment date for invoice ${invoiceNumber}: ${paymentDateStr}`);
+            return earliest;
+          }
+
           return paymentDate < earliest ? paymentDate : earliest;
-        }, new Date(invoicePayments[0].Date));
+        }, (() => {
+          // Find first valid date as fallback
+          for (const payment of invoicePayments) {
+            if (payment.Date && payment.Date !== '') {
+              const testDate = new Date(payment.Date);
+              if (!isNaN(testDate.getTime())) {
+                return testDate;
+              }
+            }
+          }
+          // Ultimate fallback to current date if no valid dates found
+          console.warn(`⚠️ No valid payment dates found for invoice ${invoiceNumber}, using current date`);
+          return new Date();
+        })());
         
         // Try to determine total sessions from rules based on memo/payment info
         let totalSessions = 0;
@@ -96,8 +117,23 @@ export class InvoiceVerificationService {
         invoiceVerifications.push(invoiceVerification);
       }
       
-      // Sort by creation date (FIFO)
-      invoiceVerifications.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      // Sort by creation date (FIFO) with proper validation
+      invoiceVerifications.sort((a, b) => {
+        const dateAStr = a.createdAt;
+        const dateBStr = b.createdAt;
+
+        if (!dateAStr || !dateBStr || dateAStr === '' || dateBStr === '') return 0;
+
+        const dateA = new Date(dateAStr);
+        const dateB = new Date(dateBStr);
+
+        if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) {
+          console.warn(`⚠️ Invalid created dates for sorting: ${dateAStr}, ${dateBStr}`);
+          return 0;
+        }
+
+        return dateA.getTime() - dateB.getTime();
+      });
       
       console.log(`✅ Created ${invoiceVerifications.length} invoice verification records`);
       return invoiceVerifications;
@@ -355,6 +391,15 @@ export class InvoiceVerificationService {
     }
     
     return 0;
+  }
+
+  /**
+   * Parse date with validation
+   */
+  private parseDate(dateStr: string): Date | null {
+    if (!dateStr || dateStr === '') return null;
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? null : date;
   }
 
   /**

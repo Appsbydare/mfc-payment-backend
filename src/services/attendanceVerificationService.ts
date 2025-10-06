@@ -104,6 +104,9 @@ export class AttendanceVerificationService {
       if (params.fromDate && params.toDate) {
         const fromDate = new Date(params.fromDate);
         const toDate = new Date(params.toDate);
+        if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+          throw new Error('Invalid date format: fromDate and toDate must be valid dates');
+        }
         if (fromDate > toDate) {
           throw new Error('Invalid date range: fromDate cannot be after toDate');
         }
@@ -968,12 +971,22 @@ export class AttendanceVerificationService {
     const sortedInvoices = availableInvoices.sort((a, b) => {
       const paymentA = payments.find(p => p.Invoice === a.invoiceNumber);
       const paymentB = payments.find(p => p.Invoice === b.invoiceNumber);
-      
+
       if (!paymentA || !paymentB) return 0;
-      
-      const dateA = new Date(paymentA.Date);
-      const dateB = new Date(paymentB.Date);
-      
+
+      const dateAStr = paymentA.Date;
+      const dateBStr = paymentB.Date;
+
+      if (!dateAStr || !dateBStr || dateAStr === '' || dateBStr === '') return 0;
+
+      const dateA = new Date(dateAStr);
+      const dateB = new Date(dateBStr);
+
+      if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) {
+        console.warn(`⚠️ Invalid payment dates for sorting: ${dateAStr}, ${dateBStr}`);
+        return 0;
+      }
+
       return dateA.getTime() - dateB.getTime(); // Oldest first
     });
     
@@ -1003,7 +1016,19 @@ export class AttendanceVerificationService {
       if (!existingInvoiceNumbers.has(payment.Invoice)) {
         console.log(`🆕 Adding missing invoice to verification: ${payment.Invoice}`);
         
-        // Create new invoice verification record
+        // Create new invoice verification record with proper date validation
+        const paymentDateStr = payment.Date;
+        let validCreatedAt = new Date().toISOString(); // Default fallback
+
+        if (paymentDateStr && paymentDateStr !== '') {
+          const testDate = new Date(paymentDateStr);
+          if (!isNaN(testDate.getTime())) {
+            validCreatedAt = testDate.toISOString();
+          } else {
+            console.warn(`⚠️ Invalid payment date for invoice ${payment.Invoice}: ${paymentDateStr}`);
+          }
+        }
+
         const newInvoice: InvoiceVerification = {
           invoiceNumber: payment.Invoice,
           customerName: customerName,
@@ -1014,7 +1039,7 @@ export class AttendanceVerificationService {
           sessionsUsed: 0,
           totalSessions: 0,
           lastUsedDate: '',
-          createdAt: payment.Date,
+          createdAt: validCreatedAt,
           updatedAt: new Date().toISOString()
         };
         
@@ -1463,7 +1488,7 @@ export class AttendanceVerificationService {
   }
 
   private parseDate(dateStr: string): Date | null {
-    if (!dateStr) return null;
+    if (!dateStr || dateStr === '') return null;
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? null : date;
   }
