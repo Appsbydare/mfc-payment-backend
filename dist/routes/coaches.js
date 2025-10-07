@@ -3,6 +3,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const googleSheets_1 = require("../services/googleSheets");
 const router = (0, express_1.Router)();
+// Helper: get a JS Date from multiple possible columns
+const getRowDate = (row) => {
+    const raw = row["Payment Date"] || row["Event Starts At"] || row.Date || row.date || '';
+    if (!raw)
+        return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+};
+// Helper: get coach name from multiple possible columns
+const getCoachName = (row) => {
+    return row.Instructors || row.instructors || row.Instructor || row.instructor || row.Coach || row.coach || 'Unknown';
+};
 router.get('/summary', async (req, res) => {
     try {
         const { fromDate, toDate } = req.query;
@@ -26,10 +38,9 @@ router.get('/summary', async (req, res) => {
         let filteredData = paymentCalcData;
         if (fromDate || toDate) {
             filteredData = paymentCalcData.filter((row) => {
-                const rowDate = row.Date || row.date || '';
-                if (!rowDate)
+                const date = getRowDate(row);
+                if (!date)
                     return false;
-                const date = new Date(rowDate);
                 if (fromDate && date < new Date(fromDate))
                     return false;
                 if (toDate && date > new Date(toDate))
@@ -39,7 +50,7 @@ router.get('/summary', async (req, res) => {
         }
         const coachGroups = {};
         filteredData.forEach((row) => {
-            const coach = row.Instructor || row.instructor || row.Coach || row.coach || 'Unknown';
+            const coach = getCoachName(row);
             if (!coachGroups[coach]) {
                 coachGroups[coach] = [];
             }
@@ -126,14 +137,13 @@ router.get('/:coachName/sessions', async (req, res) => {
             });
         }
         let sessions = paymentCalcData.filter((row) => {
-            const rowCoach = row.Instructor || row.instructor || row.Coach || row.coach || '';
+            const rowCoach = getCoachName(row);
             if (rowCoach !== coachName)
                 return false;
             if (fromDate || toDate) {
-                const rowDate = row.Date || row.date || '';
-                if (!rowDate)
+                const date = getRowDate(row);
+                if (!date)
                     return false;
-                const date = new Date(rowDate);
                 if (fromDate && date < new Date(fromDate))
                     return false;
                 if (toDate && date > new Date(toDate))
@@ -148,7 +158,7 @@ router.get('/:coachName/sessions', async (req, res) => {
             bgmAmount: parseFloat(session['BGM Amount'] || session.bgmAmount || 0) || 0,
             managementAmount: parseFloat(session['Management Amount'] || session.managementAmount || 0) || 0,
             mfcAmount: parseFloat(session['MFC Amount'] || session.mfcAmount || 0) || 0,
-            date: session.Date || session.date || '',
+            date: session["Payment Date"] || session["Event Starts At"] || session.Date || session.date || '',
             customer: session.Customer || session.customer || '',
             sessionType: session['Session Type'] || session.sessionType || '',
         }));
