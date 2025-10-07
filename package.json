@@ -5,9 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "vercel-build": "echo 'No build step needed for Vercel'"
+    "dev": "tsx watch src/index.ts"
   },
   "keywords": ["api", "payment", "mfc"],
   "author": "Appsbydare",
@@ -34,8 +32,7 @@
     "@types/cors": "^2.8.17",
     "@types/compression": "^1.7.5",
     "@types/node": "^20.10.5",
-    "typescript": "^5.3.3",
-    "tsx": "^4.7.0"
+    "typescript": "^5.3.3"
   },
   "engines": {
     "node": ">=18.0.0"
