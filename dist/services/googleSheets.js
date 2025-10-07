@@ -429,7 +429,18 @@ class GoogleSheetsService {
                 ]
             };
             for (const [sheetName, data] of Object.entries(defaultData)) {
-                await this.writeSheet(sheetName, data);
+                try {
+                    const existing = await this.readSheet(sheetName);
+                    if (Array.isArray(existing) && existing.length > 0) {
+                        console.log(`ℹ️ Sheet ${sheetName} already has ${existing.length} rows; skipping default initialization`);
+                        continue;
+                    }
+                    await this.writeSheet(sheetName, data);
+                    console.log(`✅ Initialized ${sheetName} with ${data.length} default rows`);
+                }
+                catch (innerError) {
+                    console.warn(`⚠️ Skipping initialization for ${sheetName} due to read/write error:`, innerError?.message || innerError);
+                }
             }
             console.log('✅ Google Sheets database initialized successfully');
         }
