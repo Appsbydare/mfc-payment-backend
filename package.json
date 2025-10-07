@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "build": "echo Skipping build step for Vercel"
   },
   "keywords": ["api", "payment", "mfc"],
   "author": "Appsbydare",
