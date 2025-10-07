@@ -20,6 +20,7 @@ const reports_1 = __importDefault(require("./routes/reports"));
 const discounts_1 = __importDefault(require("./routes/discounts"));
 const rules_1 = __importDefault(require("./routes/rules"));
 const attendanceVerification_1 = __importDefault(require("./routes/attendanceVerification"));
+const coaches_1 = __importDefault(require("./routes/coaches"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -58,6 +59,7 @@ app.use('/api/reports', reports_1.default);
 app.use('/api/discounts', discounts_1.default);
 app.use('/api/rules', rules_1.default);
 app.use('/api/attendance-verification', attendanceVerification_1.default);
+app.use('/api/coaches', coaches_1.default);
 app.use(notFound_1.notFound);
 app.use(errorHandler_1.errorHandler);
 const startServer = async () => {
