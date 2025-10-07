@@ -140,6 +140,83 @@ class GoogleSheetsService {
             throw new Error(`Failed to write to sheet: ${sheetName}`);
         }
     }
+    async getHeaders(sheetName) {
+        if (!this.isConfigured || !this.spreadsheetId) {
+            return [];
+        }
+        try {
+            const response = await this.sheets.spreadsheets.values.get({
+                spreadsheetId: this.spreadsheetId,
+                range: `${sheetName}!A1:Z1`,
+            });
+            const rows = response.data.values || [];
+            return rows[0] || [];
+        }
+        catch (error) {
+            console.error(`Error getting headers for sheet ${sheetName}:`, error);
+            return [];
+        }
+    }
+    async appendRow(sheetName, row) {
+        if (!this.isConfigured || !this.spreadsheetId) {
+            console.log('⚠️ Google Sheets not configured, skipping appendRow');
+            return;
+        }
+        try {
+            const headers = await this.getHeaders(sheetName);
+            const ordered = headers.length > 0 ? headers.map(h => row[h] ?? '') : Object.values(row);
+            await this.sheets.spreadsheets.values.append({
+                spreadsheetId: this.spreadsheetId,
+                range: `${sheetName}!A1`,
+                valueInputOption: 'RAW',
+                insertDataOption: 'INSERT_ROWS',
+                resource: { values: [ordered] },
+            });
+        }
+        catch (error) {
+            console.error(`Error appending row to sheet ${sheetName}:`, error);
+            throw new Error(`Failed to append row to sheet: ${sheetName}`);
+        }
+    }
+    async updateRowByIndex(sheetName, dataRowIndex, row) {
+        if (!this.isConfigured || !this.spreadsheetId) {
+            console.log('⚠️ Google Sheets not configured, skipping updateRowByIndex');
+            return;
+        }
+        try {
+            const headers = await this.getHeaders(sheetName);
+            const ordered = headers.length > 0 ? headers.map(h => row[h] ?? '') : Object.values(row);
+            const targetRowNumber = dataRowIndex + 2; // +1 to skip header, +1 for 1-based index
+            await this.sheets.spreadsheets.values.update({
+                spreadsheetId: this.spreadsheetId,
+                range: `${sheetName}!A${targetRowNumber}`,
+                valueInputOption: 'RAW',
+                resource: { values: [ordered] },
+            });
+        }
+        catch (error) {
+            console.error(`Error updating row in sheet ${sheetName}:`, error);
+            throw new Error(`Failed to update row in sheet: ${sheetName}`);
+        }
+    }
+    async findDataRowIndexById(sheetName, id, idColumnName = 'id') {
+        const rows = await this.readSheet(sheetName);
+        const lowerIdCol = String(idColumnName).toLowerCase();
+        const index = rows.findIndex(r => String(r[lowerIdCol] ?? r[idColumnName] ?? r.ID ?? r.id) === String(id));
+        return index; // -1 if not found
+    }
+    async deleteRowById(sheetName, id, idColumnName = 'id') {
+        if (!this.isConfigured || !this.spreadsheetId) {
+            console.log('⚠️ Google Sheets not configured, skipping deleteRowById');
+            return false;
+        }
+        const dataIndex = await this.findDataRowIndexById(sheetName, id, idColumnName);
+        if (dataIndex === -1) return false;
+        // Sheet index including header (header is row 0), first data row is 1
+        const sheetRowStartIndex = dataIndex + 1;
+        await this.deleteRow(sheetName, sheetRowStartIndex);
+        return true;
+    }
     async appendToSheet(sheetName, data) {
         if (!this.isConfigured || !this.spreadsheetId) {
             console.log('⚠️ Google Sheets not configured, skipping append operation');

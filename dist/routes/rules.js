@@ -79,21 +79,22 @@ router.post('/', async (req, res) => {
     try {
         const input = normalizeRule(req.body || {});
         const rules = await googleSheetsService.readSheet('rules');
-        const headers = rules[0] ? Object.keys(rules[0]) : Object.keys(input);
-        let out = rules.map((r) => ({ ...headers.reduce((o, k) => ({ ...o, [k]: r[k] ?? '' }), {}) }));
         if (input.id) {
-            let idx = out.findIndex((r) => String(r.id || r.ID) === String(input.id));
+            const idx = rules.findIndex((r) => String(r.id || r.ID) === String(input.id));
             if (idx === -1)
                 return res.status(404).json({ success: false, message: 'Rule not found' });
-            out[idx] = { ...out[idx], ...input };
+            const merged = { ...rules[idx], ...input };
+            await googleSheetsService.updateRowByIndex('rules', idx, merged);
+            return res.json({ success: true, data: merged });
         }
         else {
-            const nextId = out.reduce((m, r) => Math.max(m, parseInt(r.id || r.ID || '0') || 0), 0) + 1;
-            input.id = String(nextId);
-            out.push({ ...headers.reduce((o, k) => ({ ...o, [k]: '' }), {}), ...input });
+            const nextId = rules.reduce((m, r) => Math.max(m, parseInt(r.id || r.ID || '0') || 0), 0) + 1;
+            const newRule = { ...input, id: String(nextId) };
+            const headers = rules[0] ? Object.keys(rules[0]) : Object.keys(newRule);
+            const fullRow = { ...headers.reduce((o, k) => ({ ...o, [k]: '' }), {}), ...newRule };
+            await googleSheetsService.appendRow('rules', fullRow);
+            return res.json({ success: true, data: newRule });
         }
-        await googleSheetsService.writeSheet('rules', out);
-        return res.json({ success: true, data: input });
     }
     catch (e) {
         console.error('Rule save error:', e);
@@ -102,11 +103,9 @@ router.post('/', async (req, res) => {
 });
 router.delete('/:id', async (req, res) => {
     try {
-        const rules = await googleSheetsService.readSheet('rules');
-        const remaining = rules.filter((r) => String(r.id || r.ID) !== String(req.params.id));
-        if (remaining.length === rules.length)
+        const ok = await googleSheetsService.deleteRowById('rules', req.params.id);
+        if (!ok)
             return res.status(404).json({ success: false, message: 'Rule not found' });
-        await googleSheetsService.writeSheet('rules', remaining);
         return res.json({ success: true });
     }
     catch (e) {

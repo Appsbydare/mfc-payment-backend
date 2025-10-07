@@ -162,9 +162,11 @@ class DiscountService {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
-        const currentDiscounts = await this.googleSheetsService.readSheet('discounts');
-        currentDiscounts.push(newDiscount);
-        await this.googleSheetsService.writeSheet('discounts', currentDiscounts);
+        // Append a single row instead of rewriting entire sheet
+        const existing = await this.googleSheetsService.readSheet('discounts');
+        const headers = existing[0] ? Object.keys(existing[0]) : Object.keys(newDiscount);
+        const rowObject = { ...headers.reduce((o, k) => ({ ...o, [k]: '' }), {}), ...newDiscount };
+        await this.googleSheetsService.appendRow('discounts', rowObject);
         await this.refreshDiscounts();
         return newDiscount;
     }
@@ -179,18 +181,19 @@ class DiscountService {
             ...updates,
             updated_at: new Date().toISOString()
         };
-        currentDiscounts[index] = updatedDiscount;
-        await this.googleSheetsService.writeSheet('discounts', currentDiscounts);
+        await this.googleSheetsService.updateRowByIndex('discounts', index, updatedDiscount);
         await this.refreshDiscounts();
         return updatedDiscount;
     }
     async deleteDiscount(id) {
         const currentDiscounts = await this.googleSheetsService.readSheet('discounts');
-        const filteredDiscounts = currentDiscounts.filter(d => d.id !== id);
-        if (filteredDiscounts.length === currentDiscounts.length) {
+        const index = currentDiscounts.findIndex(d => d.id === id);
+        if (index === -1) {
             throw new Error(`Discount with ID ${id} not found`);
         }
-        await this.googleSheetsService.writeSheet('discounts', filteredDiscounts);
+        // Data index corresponds to first data row (after header)
+        const sheetRowStartIndex = index + 1;
+        await this.googleSheetsService.deleteRow('discounts', sheetRowStartIndex);
         await this.refreshDiscounts();
     }
 }
