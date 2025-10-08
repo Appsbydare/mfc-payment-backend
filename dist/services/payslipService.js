@@ -219,61 +219,87 @@ class PayslipService {
                     resolve(pdfBuffer);
                 });
                 doc.on('error', reject);
-                doc.fontSize(20).text('Malta Fight Co. - PAYSLIP', { align: 'center' });
+                // Header band
+                doc.save();
+                doc.rect(0, 0, doc.page.width, 60).fill('#111827');
+                doc.fillColor('#F9FAFB').fontSize(20).text('Malta Fight Co. - PAYSLIP', 0, 18, { align: 'center' });
+                doc.restore();
+                // Contractor details
+                doc.fontSize(12).fillColor('#000');
+                doc.text(`CONTRACTOR NAME: ${payslipData.coachName}`, 50, 80);
+                doc.text(`CONTRACTOR DESIGNATION: ${payslipData.coachDesignation}`, 50, 100);
+                doc.text(`MONTH: ${payslipData.period}`, 350, 80);
+                doc.text(`YEAR: ${new Date().getFullYear()}`, 350, 100);
                 doc.moveDown(2);
-                doc.fontSize(12);
-                doc.text(`CONTRACTOR NAME: ${payslipData.coachName}`, 50, 150);
-                doc.text(`CONTRACTOR DESIGNATION: ${payslipData.coachDesignation}`, 50, 170);
-                doc.text(`MONTH: ${payslipData.period}`, 350, 150);
-                doc.text(`YEAR: ${new Date().getFullYear()}`, 350, 170);
-                doc.moveDown(2);
+                // Table rendering helpers
+                const left = 50;
+                const cols = [left, 200, 320, 480, 540];
+                const colWidths = [cols[1]-cols[0], cols[2]-cols[1], cols[3]-cols[2], cols[4]-cols[3], 600-cols[4]];
+                const lineHeight = 18;
+                const pageBottom = doc.page.height - 50;
+                const drawHeaderRow = (y, headers) => {
+                    doc.save();
+                    doc.rect(left, y, 520, lineHeight).fill('#000');
+                    doc.fillColor('#fff').fontSize(10);
+                    headers.forEach((h, i) => doc.text(h, cols[i]+4, y+4));
+                    doc.restore();
+                    return y + lineHeight;
+                };
+                const drawRow = (y, cells) => {
+                    // grid background
+                    doc.save();
+                    doc.strokeColor('#B0B0B0').lineWidth(0.5).rect(left, y, 520, lineHeight).stroke();
+                    doc.fillColor('#000').fontSize(10);
+                    cells.forEach((c, i) => doc.text(String(c), cols[i]+4, y+4));
+                    doc.restore();
+                    return y + lineHeight;
+                };
+                const ensurePage = (y) => {
+                    if (y + lineHeight > pageBottom) {
+                        doc.addPage();
+                        return 100; // reset area for next tables
+                    }
+                    return y;
+                };
+                // PRIVATE SESSION TABLE
                 doc.fontSize(14).text('PRIVATE SESSION REVENUE', { underline: true });
-                doc.moveDown(0.5);
-                if (payslipData.privateSessions.length > 0) {
-                    doc.fontSize(10).text('CLIENT NAME', 50, doc.y);
-                    doc.text('DATE', 200, doc.y);
-                    doc.text('SESSION TYPE', 320, doc.y);
-                    doc.text('NET PRICE', 480, doc.y);
-                    doc.text('YOUR PAY', 540, doc.y);
-                    doc.moveDown(0.5);
-                    payslipData.privateSessions.forEach(session => {
-                        doc.text(session.clientName, 50, doc.y);
-                        doc.text(session.date, 200, doc.y);
-                        doc.text(session.sessionType, 320, doc.y);
-                        doc.text(`€${session.netPricePerSession.toFixed(2)}`, 480, doc.y);
-                        doc.text(`€${session.yourPay.toFixed(2)}`, 540, doc.y);
-                        doc.moveDown(0.3);
+                let y = doc.y + 8;
+                y = drawHeaderRow(y, ['CLIENT NAME','DATE','SESSION TYPE','NET PRICE','YOUR PAY']);
+                if (payslipData.privateSessions.length === 0) {
+                    y = drawRow(y, ['No private sessions', '', '', '', '']);
+                } else {
+                    payslipData.privateSessions.forEach(s => {
+                        y = ensurePage(y);
+                        y = drawRow(y, [s.clientName, s.date, s.sessionType, `€${s.netPricePerSession.toFixed(2)}`, `€${s.yourPay.toFixed(2)}`]);
                     });
                 }
-                else {
-                    doc.text('No private sessions found', 50, doc.y);
-                }
-                doc.moveDown(0.5);
-                doc.text(`TOTAL: €${payslipData.totalPrivateRevenue.toFixed(2)}`, 480, doc.y);
-                doc.moveDown(1);
+                // Private total row (dark)
+                y = ensurePage(y);
+                doc.save();
+                doc.rect(left, y, 520, lineHeight).fill('#111827');
+                doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3]+4, y+4);
+                doc.text(`€${payslipData.totalPrivateRevenue.toFixed(2)}`, cols[4]+4, y+4);
+                doc.restore();
+                y += lineHeight + 10;
+                // GROUP SESSION TABLE
                 doc.fontSize(14).text('GROUP SESSION REVENUE', { underline: true });
-                doc.moveDown(0.5);
-                if (payslipData.groupSessions.length > 0) {
-                    doc.fontSize(10).text('CLIENT NAME', 50, doc.y);
-                    doc.text('DATE', 200, doc.y);
-                    doc.text('CLASS TYPE', 320, doc.y);
-                    doc.text('MEMBERSHIP', 480, doc.y);
-                    doc.text('YOUR PAY', 540, doc.y);
-                    doc.moveDown(0.5);
-                    payslipData.groupSessions.forEach(session => {
-                        doc.text(session.clientName, 50, doc.y);
-                        doc.text(session.date, 200, doc.y);
-                        doc.text(session.classType, 320, doc.y);
-                        doc.text(session.membershipUsed, 480, doc.y);
-                        doc.text(`€${session.yourPay.toFixed(2)}`, 540, doc.y);
-                        doc.moveDown(0.3);
+                y = doc.y + 8;
+                y = drawHeaderRow(y, ['CLIENT NAME','DATE','CLASS TYPE','MEMBERSHIP','YOUR PAY']);
+                if (payslipData.groupSessions.length === 0) {
+                    y = drawRow(y, ['No group sessions', '', '', '', '']);
+                } else {
+                    payslipData.groupSessions.forEach(s => {
+                        y = ensurePage(y);
+                        y = drawRow(y, [s.clientName, s.date, s.classType, s.membershipUsed, `€${s.yourPay.toFixed(2)}`]);
                     });
                 }
-                else {
-                    doc.text('No group sessions found', 50, doc.y);
-                }
-                doc.moveDown(0.5);
-                doc.text(`TOTAL: €${payslipData.totalGroupRevenue.toFixed(2)}`, 480, doc.y);
+                // Group total row (dark)
+                y = ensurePage(y);
+                doc.save();
+                doc.rect(left, y, 520, lineHeight).fill('#111827');
+                doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3]+4, y+4);
+                doc.text(`€${payslipData.totalGroupRevenue.toFixed(2)}`, cols[4]+4, y+4);
+                doc.restore();
                 doc.moveDown(1);
                 doc.fontSize(14).text('DEDUCTIONS', { underline: true });
                 doc.moveDown(0.5);
