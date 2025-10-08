@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PayslipService = void 0;
 const googleSheets_1 = require("./googleSheets");
 const XLSX = __importStar(require("xlsx"));
+const ExcelJS = __importStar(require("exceljs"));
 const pdfkit_1 = __importDefault(require("pdfkit"));
 class PayslipService {
     MASTER_SHEET = 'payment_calc_detail';
@@ -138,55 +139,67 @@ class PayslipService {
     }
     async generateExcelPayslip(payslipData) {
         try {
-            console.log('📊 Generating Excel payslip...');
-            const workbook = XLSX.utils.book_new();
-            const payslipRows = [];
-            // Header
-            payslipRows.push(['Malta Fight Co. - PAYSLIP']);
-            payslipRows.push([]);
-            payslipRows.push(['CONTRACTOR NAME:', payslipData.coachName, '', 'MONTH:', payslipData.period]);
-            payslipRows.push(['CONTRACTOR DESIGNATION:', payslipData.coachDesignation, '', 'YEAR:', new Date().getFullYear().toString()]);
-            payslipRows.push([]);
-            // Section: Private
-            payslipRows.push(['PRIVATE SESSION REVENUE']);
-            payslipRows.push(['CLIENT NAME', 'DATE', 'SESSION TYPE', 'NET PRICE PER SESSION', 'YOUR PAY']);
-            payslipData.privateSessions.forEach(session => {
-                payslipRows.push([
-                    session.clientName,
-                    session.date,
-                    session.sessionType,
-                    `€${session.netPricePerSession.toFixed(2)}`,
-                    `€${session.yourPay.toFixed(2)}`
-                ]);
+            console.log('📊 Generating Excel payslip (formatted)...');
+            const wb = new ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Payslip');
+            const currency = (v) => `€${Number(v).toFixed(2)}`;
+            // Column widths
+            ws.columns = [
+                { header: '', key: 'a', width: 28 },
+                { header: '', key: 'b', width: 16 },
+                { header: '', key: 'c', width: 28 },
+                { header: '', key: 'd', width: 18 },
+                { header: '', key: 'e', width: 14 },
+            ];
+            // Title
+            ws.mergeCells('A1:E1');
+            ws.getCell('A1').value = 'Malta Fight Co. - PAYSLIP';
+            ws.getCell('A1').font = { bold: true, size: 16 };
+            ws.getCell('A1').alignment = { horizontal: 'center' };
+            // Header details
+            ws.getCell('A3').value = 'CONTRACTOR NAME:';
+            ws.getCell('B3').value = payslipData.coachName;
+            ws.getCell('D3').value = 'MONTH:';
+            ws.getCell('E3').value = payslipData.period;
+            ws.getCell('A4').value = 'CONTRACTOR DESIGNATION:';
+            ws.getCell('B4').value = payslipData.coachDesignation;
+            ws.getCell('D4').value = 'YEAR:';
+            ws.getCell('E4').value = new Date().getFullYear();
+            // Private section header
+            ws.mergeCells('A6:E6');
+            ws.getCell('A6').value = 'PRIVATE SESSION REVENUE';
+            ws.getCell('A6').font = { bold: true };
+            // Table header
+            ws.addRow(['CLIENT NAME', 'DATE', 'SESSION TYPE', 'NET PRICE PER SESSION', 'YOUR PAY']).font = { bold: true };
+            // Rows
+            payslipData.privateSessions.forEach(s => {
+                ws.addRow([s.clientName, s.date, s.sessionType, currency(s.netPricePerSession), currency(s.yourPay)]);
             });
-            payslipRows.push(['', '', '', 'TOTAL', `€${payslipData.totalPrivateRevenue.toFixed(2)}`]);
-            payslipRows.push([]);
-            // Section: Group
-            payslipRows.push(['GROUP SESSION REVENUE']);
-            payslipRows.push(['CLIENT NAME', 'DATE', 'CLASS TYPE', 'MEMBERSHIP USED', 'YOUR PAY']);
-            payslipData.groupSessions.forEach(session => {
-                payslipRows.push([
-                    session.clientName,
-                    session.date,
-                    session.classType,
-                    session.membershipUsed,
-                    `€${session.yourPay.toFixed(2)}`
-                ]);
+            // Private total
+            ws.addRow(['', '', '', 'TOTAL', currency(payslipData.totalPrivateRevenue)]).font = { bold: true };
+            ws.addRow([]);
+            // Group section
+            ws.mergeCells(`A${ws.rowCount + 1}:E${ws.rowCount + 1}`);
+            ws.getCell(`A${ws.rowCount}`).value = 'GROUP SESSION REVENUE';
+            ws.getCell(`A${ws.rowCount}`).font = { bold: true };
+            ws.addRow(['CLIENT NAME', 'DATE', 'CLASS TYPE', 'MEMBERSHIP USED', 'YOUR PAY']).font = { bold: true };
+            payslipData.groupSessions.forEach(s => {
+                ws.addRow([s.clientName, s.date, s.classType, s.membershipUsed, currency(s.yourPay)]);
             });
-            payslipRows.push(['', '', '', 'TOTAL', `€${payslipData.totalGroupRevenue.toFixed(2)}`]);
-            payslipRows.push([]);
-            // Section: Deductions (empty)
-            payslipRows.push(['DEDUCTIONS']);
-            payslipRows.push(['DEDUCTION TYPE', '', 'DATE', 'PAY DEDUCTED']);
-            payslipRows.push(['', '', '', 'TOTAL', '€0.00']);
-            payslipRows.push([]);
-            // Footer: Total Pay
-            payslipRows.push(['TOTAL PAY', '', '', '', `€${payslipData.totalPay.toFixed(2)}`]);
-            const worksheet = XLSX.utils.aoa_to_sheet(payslipRows);
-            XLSX.utils.book_append_sheet(workbook, worksheet, 'Payslip');
-            const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+            ws.addRow(['', '', '', 'TOTAL', currency(payslipData.totalGroupRevenue)]).font = { bold: true };
+            ws.addRow([]);
+            // Deductions
+            ws.mergeCells(`A${ws.rowCount + 1}:E${ws.rowCount + 1}`);
+            ws.getCell(`A${ws.rowCount}`).value = 'DEDUCTIONS';
+            ws.getCell(`A${ws.rowCount}`).font = { bold: true };
+            ws.addRow(['DEDUCTION TYPE', '', 'DATE', 'PAY DEDUCTED']).font = { bold: true };
+            ws.addRow(['', '', '', 'TOTAL', currency(0)]).font = { bold: true };
+            ws.addRow([]);
+            // Total pay footer
+            ws.addRow(['TOTAL PAY', '', '', '', currency(payslipData.totalPay)]).font = { bold: true };
+            const buffer = await wb.xlsx.writeBuffer();
             console.log('✅ Excel payslip generated successfully');
-            return buffer;
+            return Buffer.from(buffer);
         }
         catch (error) {
             console.error('❌ Error generating Excel payslip:', error);
@@ -217,19 +230,18 @@ class PayslipService {
                 doc.fontSize(14).text('PRIVATE SESSION REVENUE', { underline: true });
                 doc.moveDown(0.5);
                 if (payslipData.privateSessions.length > 0) {
-                    doc.fontSize(10);
-                    doc.text('CLIENT NAME', 50, doc.y);
+                    doc.fontSize(10).text('CLIENT NAME', 50, doc.y);
                     doc.text('DATE', 200, doc.y);
-                    doc.text('SESSION TYPE', 280, doc.y);
-                    doc.text('NET PRICE', 400, doc.y);
-                    doc.text('YOUR PAY', 480, doc.y);
+                    doc.text('SESSION TYPE', 320, doc.y);
+                    doc.text('NET PRICE', 480, doc.y);
+                    doc.text('YOUR PAY', 540, doc.y);
                     doc.moveDown(0.5);
                     payslipData.privateSessions.forEach(session => {
                         doc.text(session.clientName, 50, doc.y);
                         doc.text(session.date, 200, doc.y);
-                        doc.text(session.sessionType, 280, doc.y);
-                        doc.text(`€${session.netPricePerSession.toFixed(2)}`, 400, doc.y);
-                        doc.text(`€${session.yourPay.toFixed(2)}`, 480, doc.y);
+                        doc.text(session.sessionType, 320, doc.y);
+                        doc.text(`€${session.netPricePerSession.toFixed(2)}`, 480, doc.y);
+                        doc.text(`€${session.yourPay.toFixed(2)}`, 540, doc.y);
                         doc.moveDown(0.3);
                     });
                 }
@@ -237,24 +249,23 @@ class PayslipService {
                     doc.text('No private sessions found', 50, doc.y);
                 }
                 doc.moveDown(0.5);
-                doc.text(`TOTAL: €${payslipData.totalPrivateRevenue.toFixed(2)}`, 400, doc.y);
+                doc.text(`TOTAL: €${payslipData.totalPrivateRevenue.toFixed(2)}`, 480, doc.y);
                 doc.moveDown(1);
                 doc.fontSize(14).text('GROUP SESSION REVENUE', { underline: true });
                 doc.moveDown(0.5);
                 if (payslipData.groupSessions.length > 0) {
-                    doc.fontSize(10);
-                    doc.text('CLIENT NAME', 50, doc.y);
+                    doc.fontSize(10).text('CLIENT NAME', 50, doc.y);
                     doc.text('DATE', 200, doc.y);
-                    doc.text('CLASS TYPE', 280, doc.y);
-                    doc.text('MEMBERSHIP', 400, doc.y);
-                    doc.text('YOUR PAY', 480, doc.y);
+                    doc.text('CLASS TYPE', 320, doc.y);
+                    doc.text('MEMBERSHIP', 480, doc.y);
+                    doc.text('YOUR PAY', 540, doc.y);
                     doc.moveDown(0.5);
                     payslipData.groupSessions.forEach(session => {
                         doc.text(session.clientName, 50, doc.y);
                         doc.text(session.date, 200, doc.y);
-                        doc.text(session.classType, 280, doc.y);
-                        doc.text(session.membershipUsed, 400, doc.y);
-                        doc.text(`€${session.yourPay.toFixed(2)}`, 480, doc.y);
+                        doc.text(session.classType, 320, doc.y);
+                        doc.text(session.membershipUsed, 480, doc.y);
+                        doc.text(`€${session.yourPay.toFixed(2)}`, 540, doc.y);
                         doc.moveDown(0.3);
                     });
                 }
@@ -262,7 +273,7 @@ class PayslipService {
                     doc.text('No group sessions found', 50, doc.y);
                 }
                 doc.moveDown(0.5);
-                doc.text(`TOTAL: €${payslipData.totalGroupRevenue.toFixed(2)}`, 400, doc.y);
+                doc.text(`TOTAL: €${payslipData.totalGroupRevenue.toFixed(2)}`, 480, doc.y);
                 doc.moveDown(1);
                 doc.fontSize(14).text('DEDUCTIONS', { underline: true });
                 doc.moveDown(0.5);
