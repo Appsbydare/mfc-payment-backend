@@ -63,10 +63,6 @@ router.post('/payslip', async (req, res) => {
         });
     }
 });
-router.post('/bgm', (req, res) => {
-    // Backward guard; advise to use unified generate endpoint below
-    res.status(501).json({ success: false, message: 'Use POST /reports/bgm with body {fromDate,toDate,format}' });
-});
 router.get('/history', (req, res) => {
     res.json({ message: 'Get report history - TODO' });
 });
