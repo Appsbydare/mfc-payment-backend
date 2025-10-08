@@ -26,7 +26,8 @@ router.get('/summary', async (req, res) => {
         let filteredData = paymentCalcData;
         if (fromDate || toDate) {
             filteredData = paymentCalcData.filter((row) => {
-                const rowDate = row.Date || row.date || '';
+                // Prefer 'Event Starts At' from master sheet
+                const rowDate = row['Event Starts At'] || row['eventStartsAt'] || row.Date || row.date || '';
                 if (!rowDate)
                     return false;
                 const date = new Date(rowDate);
@@ -131,7 +132,7 @@ router.get('/:coachName/sessions', async (req, res) => {
             if (rowCoach !== coachName)
                 return false;
             if (fromDate || toDate) {
-                const rowDate = row.Date || row.date || '';
+                const rowDate = row['Event Starts At'] || row['eventStartsAt'] || row.Date || row.date || '';
                 if (!rowDate)
                     return false;
                 const date = new Date(rowDate);
@@ -149,9 +150,10 @@ router.get('/:coachName/sessions', async (req, res) => {
             bgmAmount: parseFloat(session['BGM Amount'] || session.bgmAmount || 0) || 0,
             managementAmount: parseFloat(session['Management Amount'] || session.managementAmount || 0) || 0,
             mfcAmount: parseFloat(session['MFC Amount'] || session.mfcAmount || 0) || 0,
-            date: session.Date || session.date || '',
-            customer: session.Customer || session.customer || '',
-            sessionType: session['Session Type'] || session.sessionType || '',
+            // Normalize key fields expected by UI
+            date: session['Event Starts At'] || session['eventStartsAt'] || session.Date || session.date || '',
+            customer: session['Customer Name'] || session['Customer'] || session.customer || '',
+            sessionType: session['Session Type'] || session['Membership Name'] || session.sessionType || '',
         }));
         res.json({
             success: true,

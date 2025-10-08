@@ -141,13 +141,13 @@ class PayslipService {
             console.log('📊 Generating Excel payslip...');
             const workbook = XLSX.utils.book_new();
             const payslipRows = [];
+            // Header
             payslipRows.push(['Malta Fight Co. - PAYSLIP']);
             payslipRows.push([]);
-            payslipRows.push(['CONTRACTOR NAME:', payslipData.coachName]);
-            payslipRows.push(['CONTRACTOR DESIGNATION:', payslipData.coachDesignation]);
-            payslipRows.push(['MONTH:', payslipData.period]);
-            payslipRows.push(['YEAR:', new Date().getFullYear().toString()]);
+            payslipRows.push(['CONTRACTOR NAME:', payslipData.coachName, '', 'MONTH:', payslipData.period]);
+            payslipRows.push(['CONTRACTOR DESIGNATION:', payslipData.coachDesignation, '', 'YEAR:', new Date().getFullYear().toString()]);
             payslipRows.push([]);
+            // Section: Private
             payslipRows.push(['PRIVATE SESSION REVENUE']);
             payslipRows.push(['CLIENT NAME', 'DATE', 'SESSION TYPE', 'NET PRICE PER SESSION', 'YOUR PAY']);
             payslipData.privateSessions.forEach(session => {
@@ -161,6 +161,7 @@ class PayslipService {
             });
             payslipRows.push(['', '', '', 'TOTAL', `€${payslipData.totalPrivateRevenue.toFixed(2)}`]);
             payslipRows.push([]);
+            // Section: Group
             payslipRows.push(['GROUP SESSION REVENUE']);
             payslipRows.push(['CLIENT NAME', 'DATE', 'CLASS TYPE', 'MEMBERSHIP USED', 'YOUR PAY']);
             payslipData.groupSessions.forEach(session => {
@@ -174,10 +175,12 @@ class PayslipService {
             });
             payslipRows.push(['', '', '', 'TOTAL', `€${payslipData.totalGroupRevenue.toFixed(2)}`]);
             payslipRows.push([]);
+            // Section: Deductions (empty)
             payslipRows.push(['DEDUCTIONS']);
             payslipRows.push(['DEDUCTION TYPE', '', 'DATE', 'PAY DEDUCTED']);
             payslipRows.push(['', '', '', 'TOTAL', '€0.00']);
             payslipRows.push([]);
+            // Footer: Total Pay
             payslipRows.push(['TOTAL PAY', '', '', '', `€${payslipData.totalPay.toFixed(2)}`]);
             const worksheet = XLSX.utils.aoa_to_sheet(payslipRows);
             XLSX.utils.book_append_sheet(workbook, worksheet, 'Payslip');
@@ -208,8 +211,8 @@ class PayslipService {
                 doc.fontSize(12);
                 doc.text(`CONTRACTOR NAME: ${payslipData.coachName}`, 50, 150);
                 doc.text(`CONTRACTOR DESIGNATION: ${payslipData.coachDesignation}`, 50, 170);
-                doc.text(`MONTH: ${payslipData.period}`, 300, 150);
-                doc.text(`YEAR: ${new Date().getFullYear()}`, 300, 170);
+                doc.text(`MONTH: ${payslipData.period}`, 350, 150);
+                doc.text(`YEAR: ${new Date().getFullYear()}`, 350, 170);
                 doc.moveDown(2);
                 doc.fontSize(14).text('PRIVATE SESSION REVENUE', { underline: true });
                 doc.moveDown(0.5);
