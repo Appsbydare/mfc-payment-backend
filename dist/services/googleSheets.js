@@ -1,84 +1,43 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.googleSheetsService = exports.GoogleSheetsService = void 0;
 const googleapis_1 = require("googleapis");
 const google_auth_library_1 = require("google-auth-library");
-const dotenv = __importStar(require("dotenv"));
-dotenv.config();
 class GoogleSheetsService {
+    sheets;
+    spreadsheetId;
+    isConfigured = false;
     constructor() {
-        this.isConfigured = false;
-        const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-        const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-        const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
-        if (!spreadsheetId || !clientEmail || !privateKey) {
-            console.log('⚠️ Google Sheets configuration incomplete, service will be disabled');
-            this.isConfigured = false;
-            return;
-        }
-        this.spreadsheetId = spreadsheetId;
-        this.isConfigured = true;
         this.initializeSheets();
     }
-    initializeSheets() {
-        if (!this.isConfigured)
-            return;
-        const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-        const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
-        if (!clientEmail || !privateKey) {
-            console.log('⚠️ Missing Google Sheets credentials');
-            this.isConfigured = false;
-            return;
-        }
+    async initializeSheets() {
         try {
+            const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+            const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY?.replace(/\\n/g, '\n');
+            const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+            if (!clientEmail || !privateKey || !spreadsheetId) {
+                console.warn('⚠️ Google Sheets credentials not configured. Service will use mock data.');
+                this.isConfigured = false;
+                return;
+            }
             const auth = new google_auth_library_1.JWT({
                 email: clientEmail,
-                key: privateKey.replace(/\\n/g, '\n'),
+                key: privateKey,
                 scopes: ['https://www.googleapis.com/auth/spreadsheets'],
             });
             this.sheets = googleapis_1.google.sheets({ version: 'v4', auth });
+            this.spreadsheetId = spreadsheetId;
+            this.isConfigured = true;
+            console.log('✅ Google Sheets service initialized successfully');
         }
         catch (error) {
-            console.error('❌ Failed to initialize Google Sheets:', error);
+            console.error('❌ Failed to initialize Google Sheets service:', error);
             this.isConfigured = false;
         }
     }
     async readSheet(sheetName) {
         if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, returning empty data');
+            console.warn('⚠️ Google Sheets not configured, returning empty array');
             return [];
         }
         try {
@@ -101,170 +60,91 @@ class GoogleSheetsService {
             return data;
         }
         catch (error) {
-            console.error(`Error reading sheet ${sheetName}:`, error);
-            throw new Error(`Failed to read sheet: ${sheetName}`);
+            console.error(`❌ Error reading sheet ${sheetName}:`, error);
+            return [];
         }
     }
     async writeSheet(sheetName, data) {
         if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, skipping write operation');
+            console.warn('⚠️ Google Sheets not configured, skipping write operation');
             return;
         }
         try {
-            if (data.length === 0)
+            if (data.length === 0) {
+                console.warn(`⚠️ No data to write to sheet ${sheetName}`);
                 return;
+            }
             const headers = Object.keys(data[0]);
-            console.log(`Writing to sheet ${sheetName} with headers:`, headers);
-            console.log(`First row data:`, data[0]);
-            const values = [
-                headers,
-                ...data.map(row => headers.map(header => row[header] || ''))
-            ];
-            console.log(`Values to write (first 2 rows):`, values.slice(0, 2));
-            console.log(`First row values:`, values[1]);
-            await this.sheets.spreadsheets.values.clear({
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A:Z`,
-            });
-            await this.sheets.spreadsheets.values.append({
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A1`,
-                valueInputOption: 'RAW',
-                insertDataOption: 'OVERWRITE',
-                resource: { values },
-            });
-            console.log(`Successfully wrote ${data.length} rows to sheet ${sheetName}`);
-        }
-        catch (error) {
-            console.error(`Error writing to sheet ${sheetName}:`, error);
-            throw new Error(`Failed to write to sheet: ${sheetName}`);
-        }
-    }
-    async getHeaders(sheetName) {
-        if (!this.isConfigured || !this.spreadsheetId) {
-            return [];
-        }
-        try {
-            const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A1:Z1`,
-            });
-            const rows = response.data.values || [];
-            return rows[0] || [];
-        }
-        catch (error) {
-            console.error(`Error getting headers for sheet ${sheetName}:`, error);
-            return [];
-        }
-    }
-    async appendRow(sheetName, row) {
-        if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, skipping appendRow');
-            return;
-        }
-        try {
-            const headers = await this.getHeaders(sheetName);
-            const ordered = headers.length > 0 ? headers.map(h => row[h] ?? '') : Object.values(row);
-            await this.sheets.spreadsheets.values.append({
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A1`,
-                valueInputOption: 'RAW',
-                insertDataOption: 'INSERT_ROWS',
-                resource: { values: [ordered] },
-            });
-        }
-        catch (error) {
-            console.error(`Error appending row to sheet ${sheetName}:`, error);
-            throw new Error(`Failed to append row to sheet: ${sheetName}`);
-        }
-    }
-    async updateRowByIndex(sheetName, dataRowIndex, row) {
-        if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, skipping updateRowByIndex');
-            return;
-        }
-        try {
-            const headers = await this.getHeaders(sheetName);
-            const ordered = headers.length > 0 ? headers.map(h => row[h] ?? '') : Object.values(row);
-            const targetRowNumber = dataRowIndex + 2; // +1 to skip header, +1 for 1-based index
+            const values = [headers, ...data.map(row => headers.map(header => row[header] || ''))];
             await this.sheets.spreadsheets.values.update({
                 spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A${targetRowNumber}`,
+                range: `${sheetName}!A1`,
                 valueInputOption: 'RAW',
-                resource: { values: [ordered] },
+                requestBody: {
+                    values,
+                },
             });
+            console.log(`✅ Successfully wrote ${data.length} rows to sheet ${sheetName}`);
         }
         catch (error) {
-            console.error(`Error updating row in sheet ${sheetName}:`, error);
-            throw new Error(`Failed to update row in sheet: ${sheetName}`);
+            console.error(`❌ Error writing to sheet ${sheetName}:`, error);
+            throw error;
         }
-    }
-    async findDataRowIndexById(sheetName, id, idColumnName = 'id') {
-        const rows = await this.readSheet(sheetName);
-        const lowerIdCol = String(idColumnName).toLowerCase();
-        const index = rows.findIndex(r => String(r[lowerIdCol] ?? r[idColumnName] ?? r.ID ?? r.id) === String(id));
-        return index; // -1 if not found
-    }
-    async deleteRowById(sheetName, id, idColumnName = 'id') {
-        if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, skipping deleteRowById');
-            return false;
-        }
-        const dataIndex = await this.findDataRowIndexById(sheetName, id, idColumnName);
-        if (dataIndex === -1) return false;
-        // Sheet index including header (header is row 0), first data row is 1
-        const sheetRowStartIndex = dataIndex + 1;
-        await this.deleteRow(sheetName, sheetRowStartIndex);
-        return true;
     }
     async appendToSheet(sheetName, data) {
         if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, skipping append operation');
+            console.warn('⚠️ Google Sheets not configured, skipping append operation');
             return;
         }
         try {
-            if (data.length === 0)
+            if (data.length === 0) {
+                console.warn(`⚠️ No data to append to sheet ${sheetName}`);
                 return;
+            }
             const headers = Object.keys(data[0]);
-            console.log(`Appending to sheet ${sheetName} with headers:`, headers);
-            console.log(`First row data:`, data[0]);
-            const values = [
-                headers,
-                ...data.map(row => headers.map(header => row[header] || ''))
-            ];
-            console.log(`Values to append (first 2 rows):`, values.slice(0, 2));
-            await this.sheets.spreadsheets.values.update({
+            const values = data.map(row => headers.map(header => row[header] || ''));
+            await this.sheets.spreadsheets.values.append({
                 spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A1`,
+                range: `${sheetName}!A:Z`,
                 valueInputOption: 'RAW',
-                resource: { values },
+                insertDataOption: 'INSERT_ROWS',
+                requestBody: {
+                    values,
+                },
             });
-            console.log(`Successfully appended ${data.length} rows to sheet ${sheetName}`);
+            console.log(`✅ Successfully appended ${data.length} rows to sheet ${sheetName}`);
         }
         catch (error) {
-            console.error(`Error appending to sheet ${sheetName}:`, error);
-            throw new Error(`Failed to append to sheet: ${sheetName}`);
+            console.error(`❌ Error appending to sheet ${sheetName}:`, error);
+            throw error;
         }
     }
     async updateRow(sheetName, rowIndex, data) {
+        if (!this.isConfigured || !this.spreadsheetId) {
+            console.warn('⚠️ Google Sheets not configured, skipping update operation');
+            return;
+        }
         try {
             const headers = Object.keys(data);
             const values = [headers.map(header => data[header] || '')];
             await this.sheets.spreadsheets.values.update({
                 spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A${rowIndex + 1}`,
+                range: `${sheetName}!A${rowIndex + 1}:Z${rowIndex + 1}`,
                 valueInputOption: 'RAW',
-                resource: { values },
+                requestBody: {
+                    values,
+                },
             });
+            console.log(`✅ Successfully updated row ${rowIndex + 1} in sheet ${sheetName}`);
         }
         catch (error) {
-            console.error(`Error updating row in sheet ${sheetName}:`, error);
-            throw new Error(`Failed to update row in sheet: ${sheetName}`);
+            console.error(`❌ Error updating row in sheet ${sheetName}:`, error);
+            throw error;
         }
     }
     async clearSheet(sheetName) {
         if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, skipping clear operation');
+            console.warn('⚠️ Google Sheets not configured, skipping clear operation');
             return;
         }
         try {
@@ -272,23 +152,31 @@ class GoogleSheetsService {
                 spreadsheetId: this.spreadsheetId,
                 range: `${sheetName}!A:Z`,
             });
-            console.log(`Cleared sheet ${sheetName}`);
+            console.log(`✅ Successfully cleared sheet ${sheetName}`);
         }
         catch (error) {
-            console.error(`Error clearing sheet ${sheetName}:`, error);
-            throw new Error(`Failed to clear sheet: ${sheetName}`);
+            console.error(`❌ Error clearing sheet ${sheetName}:`, error);
+            throw error;
         }
     }
     async deleteRow(sheetName, rowIndex) {
+        if (!this.isConfigured || !this.spreadsheetId) {
+            console.warn('⚠️ Google Sheets not configured, skipping delete operation');
+            return;
+        }
         try {
+            const sheetId = await this.getSheetId(sheetName);
+            if (!sheetId) {
+                throw new Error(`Sheet ${sheetName} not found`);
+            }
             await this.sheets.spreadsheets.batchUpdate({
                 spreadsheetId: this.spreadsheetId,
-                resource: {
+                requestBody: {
                     requests: [
                         {
                             deleteDimension: {
                                 range: {
-                                    sheetId: await this.getSheetId(sheetName),
+                                    sheetId,
                                     dimension: 'ROWS',
                                     startIndex: rowIndex,
                                     endIndex: rowIndex + 1,
@@ -298,10 +186,11 @@ class GoogleSheetsService {
                     ],
                 },
             });
+            console.log(`✅ Successfully deleted row ${rowIndex + 1} from sheet ${sheetName}`);
         }
         catch (error) {
-            console.error(`Error deleting row from sheet ${sheetName}:`, error);
-            throw new Error(`Failed to delete row from sheet: ${sheetName}`);
+            console.error(`❌ Error deleting row from sheet ${sheetName}:`, error);
+            throw error;
         }
     }
     async getSheetId(sheetName) {
@@ -309,15 +198,12 @@ class GoogleSheetsService {
             const response = await this.sheets.spreadsheets.get({
                 spreadsheetId: this.spreadsheetId,
             });
-            const sheet = response.data.sheets.find((s) => s.properties.title === sheetName);
-            if (!sheet) {
-                throw new Error(`Sheet ${sheetName} not found`);
-            }
-            return sheet.properties.sheetId;
+            const sheet = response.data.sheets?.find((s) => s.properties.title === sheetName);
+            return sheet?.properties.sheetId || null;
         }
         catch (error) {
-            console.error(`Error getting sheet ID for ${sheetName}:`, error);
-            throw new Error(`Failed to get sheet ID: ${sheetName}`);
+            console.error(`❌ Error getting sheet ID for ${sheetName}:`, error);
+            return null;
         }
     }
     async initializeDatabase() {
@@ -328,37 +214,53 @@ class GoogleSheetsService {
                 rules: [
                     {
                         id: 1,
-                        rule_name: 'Group Classes Default',
-                        package_name: '',
+                        membership_name: 'Adult Single - Pay as You Go',
                         session_type: 'group',
-                        price: 0,
-                        sessions: 1,
-                        coach_percentage: 43.5,
-                        bgm_percentage: 30.0,
-                        management_percentage: 8.5,
-                        mfc_percentage: 18.0,
-                        is_fixed_rate: false,
-                        allow_discounts: true,
-                        tax_exempt: false,
-                        notes: 'Default rule for group classes',
+                        coach_percentage: 80,
+                        bgm_percentage: 10,
+                        management_percentage: 5,
+                        mfc_percentage: 5,
+                        unit_price: 15.00,
+                        active: true,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     },
                     {
                         id: 2,
-                        rule_name: 'Private Sessions Default',
-                        package_name: '',
+                        membership_name: 'Adult Pay Monthly - 3 x Week',
+                        session_type: 'group',
+                        coach_percentage: 80,
+                        bgm_percentage: 10,
+                        management_percentage: 5,
+                        mfc_percentage: 5,
+                        unit_price: 12.00,
+                        active: true,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    },
+                    {
+                        id: 3,
+                        membership_name: '1 to 1 Private Combat Session',
                         session_type: 'private',
-                        price: 0,
-                        sessions: 1,
-                        coach_percentage: 80.0,
-                        bgm_percentage: 15.0,
-                        management_percentage: 0.0,
-                        mfc_percentage: 5.0,
-                        is_fixed_rate: false,
-                        allow_discounts: true,
-                        tax_exempt: false,
-                        notes: 'Default rule for private sessions',
+                        coach_percentage: 80,
+                        bgm_percentage: 10,
+                        management_percentage: 5,
+                        mfc_percentage: 5,
+                        unit_price: 35.00,
+                        active: true,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    },
+                    {
+                        id: 4,
+                        membership_name: 'Group Private Session',
+                        session_type: 'private',
+                        coach_percentage: 80,
+                        bgm_percentage: 10,
+                        management_percentage: 5,
+                        mfc_percentage: 5,
+                        unit_price: 75.00,
+                        active: true,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     }
@@ -366,37 +268,37 @@ class GoogleSheetsService {
                 discounts: [
                     {
                         id: 1,
-                        discount_code: 'LOYALTY: 1 TO 1 - SINGLE CLASS DISCOUNT',
-                        name: 'Loyalty 1-to-1 Single Class Discount',
-                        applicable_percentage: 12.5,
-                        coach_payment_type: 'partial',
+                        discount_code: 'WELCOME',
+                        name: 'Welcome Discount',
+                        applicable_percentage: 20,
+                        coach_payment_type: 'percentage',
                         match_type: 'exact',
                         active: true,
-                        notes: '12.5% discount on single private sessions for loyalty members',
+                        notes: '20% discount for new members',
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     },
                     {
                         id: 2,
-                        discount_code: 'MindBody Switch',
-                        name: 'MindBody Switch',
-                        applicable_percentage: 0,
-                        coach_payment_type: 'full',
+                        discount_code: 'STUDENT',
+                        name: 'Student Discount',
+                        applicable_percentage: 15,
+                        coach_payment_type: 'percentage',
                         match_type: 'exact',
                         active: true,
-                        notes: 'Treat as regular full price paying customer',
+                        notes: '15% discount for students',
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     },
                     {
                         id: 3,
-                        discount_code: 'Freedom Pass',
-                        name: 'Freedom Pass',
-                        applicable_percentage: 0,
-                        coach_payment_type: 'full',
+                        discount_code: 'FAMILY',
+                        name: 'Family Discount',
+                        applicable_percentage: 10,
+                        coach_payment_type: 'percentage',
                         match_type: 'exact',
                         active: true,
-                        notes: 'Treat as regular full price paying customer',
+                        notes: '10% discount for family members',
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     },
@@ -439,7 +341,7 @@ class GoogleSheetsService {
                     console.log(`✅ Initialized ${sheetName} with ${data.length} default rows`);
                 }
                 catch (innerError) {
-                    console.warn(`⚠️ Skipping initialization for ${sheetName} due to read/write error:`, innerError?.message || innerError);
+                    console.warn(`⚠️ Skipping initialization for ${sheetName} due to read/write error:`, innerError);
                 }
             }
             console.log('✅ Google Sheets database initialized successfully');
@@ -450,11 +352,10 @@ class GoogleSheetsService {
         }
     }
     async healthCheck() {
-        if (!this.isConfigured || !this.spreadsheetId) {
-            console.log('⚠️ Google Sheets not configured, health check returning false');
-            return false;
-        }
         try {
+            if (!this.isConfigured) {
+                return false;
+            }
             await this.sheets.spreadsheets.get({
                 spreadsheetId: this.spreadsheetId,
             });
