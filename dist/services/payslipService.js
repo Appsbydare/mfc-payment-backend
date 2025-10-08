@@ -232,30 +232,43 @@ class PayslipService {
                 doc.text(`YEAR: ${new Date().getFullYear()}`, 350, 100);
                 doc.moveDown(2);
                 // Table rendering helpers
-                const left = 50;
-                const cols = [left, 200, 320, 480, 540];
-                const colWidths = [cols[1]-cols[0], cols[2]-cols[1], cols[3]-cols[2], cols[4]-cols[3], 600-cols[4]];
-                const lineHeight = 18;
+                const left = 40;
+                const tableWidth = 520;
+                const colWidths = [150, 80, 130, 120, 40]; // sums to 520
+                const cols = [left, left + colWidths[0], left + colWidths[0] + colWidths[1], left + colWidths[0] + colWidths[1] + colWidths[2], left + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3]];
+                const baseRowHeight = 16;
                 const pageBottom = doc.page.height - 50;
                 const drawHeaderRow = (y, headers) => {
                     doc.save();
-                    doc.rect(left, y, 520, lineHeight).fill('#000');
+                    doc.rect(left, y, tableWidth, baseRowHeight).fill('#000');
                     doc.fillColor('#fff').fontSize(10);
-                    headers.forEach((h, i) => doc.text(h, cols[i]+4, y+4));
+                    let x = left; headers.forEach((h, i) => { doc.text(h, x + 4, y + 4, { width: colWidths[i], ellipsis: true }); x += colWidths[i]; });
                     doc.restore();
-                    return y + lineHeight;
+                    return y + baseRowHeight;
                 };
                 const drawRow = (y, cells) => {
-                    // grid background
+                    // compute row height based on wrapped text
+                    doc.fontSize(9);
+                    const paddX = 4, paddY = 3;
+                    let maxH = baseRowHeight;
+                    cells.forEach((c, i) => {
+                        const h = doc.heightOfString(String(c), { width: colWidths[i] - paddX * 2, lineGap: 1 });
+                        maxH = Math.max(maxH, h + paddY * 2);
+                    });
+                    // grid box
                     doc.save();
-                    doc.strokeColor('#B0B0B0').lineWidth(0.5).rect(left, y, 520, lineHeight).stroke();
-                    doc.fillColor('#000').fontSize(10);
-                    cells.forEach((c, i) => doc.text(String(c), cols[i]+4, y+4));
+                    doc.strokeColor('#B0B0B0').lineWidth(0.5).rect(left, y, tableWidth, maxH).stroke();
+                    doc.fillColor('#000');
+                    // draw wrapped text per cell
+                    let x = left; cells.forEach((c, i) => {
+                        doc.text(String(c), x + paddX, y + paddY, { width: colWidths[i] - paddX * 2, lineGap: 1 });
+                        x += colWidths[i];
+                    });
                     doc.restore();
-                    return y + lineHeight;
+                    return y + maxH;
                 };
                 const ensurePage = (y) => {
-                    if (y + lineHeight > pageBottom) {
+                    if (y + baseRowHeight > pageBottom) {
                         doc.addPage();
                         return 100; // reset area for next tables
                     }
@@ -276,11 +289,11 @@ class PayslipService {
                 // Private total row (dark)
                 y = ensurePage(y);
                 doc.save();
-                doc.rect(left, y, 520, lineHeight).fill('#111827');
-                doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3]+4, y+4);
-                doc.text(`€${payslipData.totalPrivateRevenue.toFixed(2)}`, cols[4]+4, y+4);
+                doc.rect(left, y, tableWidth, baseRowHeight).fill('#111827');
+                doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3] + 4, y + 4);
+                doc.text(`€${payslipData.totalPrivateRevenue.toFixed(2)}`, cols[4] + 4, y + 4);
                 doc.restore();
-                y += lineHeight + 10;
+                y += baseRowHeight + 10;
                 // GROUP SESSION TABLE
                 doc.fontSize(14).text('GROUP SESSION REVENUE', { underline: true });
                 y = doc.y + 8;
@@ -296,9 +309,9 @@ class PayslipService {
                 // Group total row (dark)
                 y = ensurePage(y);
                 doc.save();
-                doc.rect(left, y, 520, lineHeight).fill('#111827');
-                doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3]+4, y+4);
-                doc.text(`€${payslipData.totalGroupRevenue.toFixed(2)}`, cols[4]+4, y+4);
+                doc.rect(left, y, tableWidth, baseRowHeight).fill('#111827');
+                doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3] + 4, y + 4);
+                doc.text(`€${payslipData.totalGroupRevenue.toFixed(2)}`, cols[4] + 4, y + 4);
                 doc.restore();
                 doc.moveDown(1);
                 doc.fontSize(14).text('DEDUCTIONS', { underline: true });
