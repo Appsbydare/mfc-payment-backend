@@ -4,6 +4,8 @@ const express_1 = require("express");
 const payslipService_1 = require("../services/payslipService");
 const router = (0, express_1.Router)();
 const payslipService = new payslipService_1.PayslipService();
+const { generateBgmReport } = require("../services/bgmReportService");
+const { generateManagementReport } = require("../services/managementReportService");
 router.post('/monthly', (req, res) => {
     res.json({ message: 'Generate monthly report - TODO' });
 });
@@ -62,10 +64,48 @@ router.post('/payslip', async (req, res) => {
     }
 });
 router.post('/bgm', (req, res) => {
-    res.json({ message: 'Generate BGM report - TODO' });
+    // Backward guard; advise to use unified generate endpoint below
+    res.status(501).json({ success: false, message: 'Use POST /reports/bgm with body {fromDate,toDate,format}' });
 });
 router.get('/history', (req, res) => {
     res.json({ message: 'Get report history - TODO' });
+});
+// New endpoints for BGM and Management reports
+router.post('/bgm', async (req, res) => {
+    try {
+        const { fromDate, toDate, format = 'excel' } = req.body || {};
+        const buffer = await generateBgmReport({ fromDate, toDate, format });
+        if (format === 'pdf') {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="bgm_report_${new Date().toISOString().split('T')[0]}.pdf"`);
+        }
+        else {
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="bgm_report_${new Date().toISOString().split('T')[0]}.xlsx"`);
+        }
+        res.send(buffer);
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error?.message || 'Failed to generate BGM report' });
+    }
+});
+router.post('/management', async (req, res) => {
+    try {
+        const { fromDate, toDate, format = 'excel' } = req.body || {};
+        const buffer = await generateManagementReport({ fromDate, toDate, format });
+        if (format === 'pdf') {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="management_report_${new Date().toISOString().split('T')[0]}.pdf"`);
+        }
+        else {
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="management_report_${new Date().toISOString().split('T')[0]}.xlsx"`);
+        }
+        res.send(buffer);
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error?.message || 'Failed to generate Management report' });
+    }
 });
 exports.default = router;
 //# sourceMappingURL=reports.js.map
