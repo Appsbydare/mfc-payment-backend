@@ -53,7 +53,7 @@ class PayslipService {
                 };
             }
             let filteredData = paymentCalcData.filter((row) => {
-                const rowCoach = row.Instructor || row.instructor || row.Coach || row.coach || '';
+                const rowCoach = row.Instructors || row.Instructor || row.instructors || row.instructor || row.Coach || row.coach || '';
                 if (rowCoach !== params.coachName)
                     return false;
                 if (params.fromDate || params.toDate) {

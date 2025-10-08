@@ -39,7 +39,8 @@ router.get('/summary', async (req, res) => {
         }
         const coachGroups = {};
         filteredData.forEach((row) => {
-            const coach = row.Instructor || row.instructor || row.Coach || row.coach || 'Unknown';
+            // Prefer 'Instructors' (plural) which is the column used in Sheets
+            const coach = row.Instructors || row.Instructor || row.instructors || row.instructor || row.Coach || row.coach || 'Unknown';
             if (!coachGroups[coach]) {
                 coachGroups[coach] = [];
             }
@@ -126,7 +127,7 @@ router.get('/:coachName/sessions', async (req, res) => {
             });
         }
         let sessions = paymentCalcData.filter((row) => {
-            const rowCoach = row.Instructor || row.instructor || row.Coach || row.coach || '';
+            const rowCoach = row.Instructors || row.Instructor || row.instructors || row.instructor || row.Coach || row.coach || '';
             if (rowCoach !== coachName)
                 return false;
             if (fromDate || toDate) {
