@@ -307,7 +307,22 @@ class AttendanceVerificationService {
             else {
                 console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
                 verificationStatus = 'Verified';
-                const invoiceResult = await this.useInvoiceForSession(customerName, Number(rule.unit_price || 0), attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
+                
+                // Find applicable discount for this payment to get correct discounted session price
+                const sessionPrice = Number(rule.unit_price || 0);
+                let discountedSessionPrice = sessionPrice;
+                
+                if (matchingPayment && discounts && discounts.length > 0) {
+                    const applicableDiscount = await this.findApplicableDiscount(matchingPayment, discounts);
+                    if (applicableDiscount) {
+                        const discountPercentage = Number(applicableDiscount.applicable_percentage || 0);
+                        const discountFactor = 1 - (discountPercentage / 100);
+                        discountedSessionPrice = this.round2(sessionPrice * discountFactor);
+                        console.log(`💰 Found discount: ${applicableDiscount.name} (${discountPercentage}%) - Session Price: ${sessionPrice} → ${discountedSessionPrice}`);
+                    }
+                }
+                
+                const invoiceResult = await this.useInvoiceForSession(customerName, discountedSessionPrice, attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
                 updatedInvoices = invoiceResult.updatedInvoices;
                 invoiceNumber = invoiceResult.usedInvoiceNumber;
                 amount = invoiceResult.usedAmount;
@@ -317,6 +332,7 @@ class AttendanceVerificationService {
         else {
             console.log(`❌ No payment match found for ${customerName} with membership "${membershipName}"`);
             verificationStatus = 'Not Verified';
+            invoiceNumber = 'Pending Payment';
         }
         const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
         let rule = null;
@@ -549,9 +565,13 @@ class AttendanceVerificationService {
     // CHANGE NOTE (2025-10-10):
     // - Set master row Amount = sessionPrice (verified amount)
     // - Allow multi-invoice allocation, oldest-first, joining invoice numbers (e.g. "21, 343")
+    // - Use discounted session price for invoice verification (not full session price)
+    // - Show "Pending Payment" when no invoice is available instead of empty/invoice numbers
     // Revert guide:
     // - Flip ENABLE_INVOICE_SPLIT=false inside useInvoiceForSession()
     // - Restore usedAmount line to read the full payment invoice amount if required
+    // - Remove discount calculation in processAttendanceRecordWithInvoiceTracking
+    // - Change "Pending Payment" back to empty string in Not Verified case
     async useInvoiceForSession(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules) {
         console.log(`💰 Finding appropriate invoice for session (${sessionPrice}) on ${sessionDate} for customer ${customerName}`);
         
@@ -622,7 +642,7 @@ class AttendanceVerificationService {
             }
             return {
                 updatedInvoices,
-                usedInvoiceNumber: '',
+                usedInvoiceNumber: 'Pending Payment',
                 usedAmount: 0,
                 usedPaymentDate: ''
             };
