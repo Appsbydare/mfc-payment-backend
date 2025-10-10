@@ -179,11 +179,12 @@ class AttendanceVerificationService {
             console.log(`✅ Step 1: Payment verification completed - ${masterData.length} records processed`);
             console.log('📋 Step 2: Applying discounts (memory only)...');
             const { payments, discounts } = await this.loadAllData();
-            masterData = await this.applyDiscountsToMasterData(masterData, discounts, payments);
+            const { rules } = await this.loadAllData();
+            masterData = await this.applyDiscountsToMasterData(masterData, discounts, payments, rules);
             const discountAppliedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
             console.log(`✅ Step 2: Discount application completed - ${discountAppliedCount} records with discounts`);
             console.log('📋 Step 3: Recalculating amounts (memory only)...');
-            masterData = await this.recalculateDiscountedAmounts(masterData);
+            masterData = await this.recalculateDiscountedAmounts(masterData, rules);
             const recalculatedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
             console.log(`✅ Step 3: Amount recalculation completed - ${recalculatedCount} records recalculated`);
             console.log('📋 Step 4: Re-verifying invoices with discounted amounts (memory only)...');
@@ -333,9 +334,9 @@ class AttendanceVerificationService {
             sessions: toNum(r.sessions),
             sessions_per_pack: toNum(r.sessions_per_pack || r.sessions),
             unit_price: toNum(r.unit_price, null),
-            coach_percentage: toNum(r.coach_percentage || r.coachPct, null),
-            bgm_percentage: toNum(r.bgm_percentage || r.bgmPct, null),
-            management_percentage: toNum(r.management_percentage || r.mgmtPct, null),
+            coach_percentage: toNum(r.coach_percentage || r.coach_percent || r.coachPct, null),
+            bgm_percentage: toNum(r.bgm_percentage || r.bgm_percent || r.bgmPct, null),
+            management_percentage: toNum(r.management_percentage || r.management || r.mgmtPct, null),
             mfc_percentage: toNum(r.mfc_percentage || r.mfcPct, null),
             pricing_type: String(r.pricing_type || '').trim().toLowerCase(),
             per_week: toNum(r.per_week),
@@ -626,10 +627,15 @@ class AttendanceVerificationService {
     // - Allow multi-invoice allocation, oldest-first, joining invoice numbers (e.g. "21, 343")
     // - Re-verify invoices AFTER discounts are applied using discounted session prices
     // - This ensures $289 invoice can cover more sessions with discounted price (23.18 vs 28.97)
+    // - Fix column name mapping: coach_percent, bgm_percent, management (not management_percentage)
+    // - Use actual rule percentages from Google Sheet instead of hardcoded defaults
+    // - Calculate amounts using discounted session price * rule percentages
     // Revert guide:
     // - Remove Step 4 (reverifyInvoicesWithDiscountedAmounts) from batchVerificationProcess
     // - Flip ENABLE_INVOICE_SPLIT=false inside useInvoiceForSession()
     // - Restore usedAmount line to read the full payment invoice amount if required
+    // - Revert column name mapping in normalizeRules()
+    // - Change calculateAmounts calls back to use null instead of matchingRule
     async useInvoiceForSession(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules) {
         console.log(`💰 Finding appropriate invoice for session (${sessionPrice}) on ${sessionDate} for customer ${customerName}`);
         
@@ -1232,7 +1238,9 @@ class AttendanceVerificationService {
             const discountedSessionPrice = this.round2(row.sessionPrice * discountFactor);
             console.log(`💰 Applying discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%)`);
             console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
-            const amounts = this.calculateAmounts(discountedSessionPrice, null, 'group');
+            // Find the matching rule for this record
+            const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
+            const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
             return {
                 ...row,
                 discount: matchingDiscount.name,
@@ -1248,7 +1256,7 @@ class AttendanceVerificationService {
         console.log(`✅ Applied discounts to ${discountAppliedCount} records`);
         return updated;
     }
-    async applyDiscountsToMasterData(masterData, discounts, payments) {
+    async applyDiscountsToMasterData(masterData, discounts, payments, rules) {
         console.log(`🔍 Applying discounts to ${masterData.length} master records`);
         if (!discounts || discounts.length === 0) {
             console.log(`⚠️ No discounts available to apply`);
@@ -1350,7 +1358,7 @@ class AttendanceVerificationService {
         console.log(`✅ Added discount information to ${discountAppliedCount} records`);
         return updated;
     }
-    async recalculateDiscountedAmounts(masterData) {
+    async recalculateDiscountedAmounts(masterData, rules) {
         console.log(`💰 Recalculating amounts for ${masterData.length} master records`);
         const updated = masterData.map(row => {
             if (!row.discount || row.discountPercentage <= 0) {
@@ -1361,7 +1369,9 @@ class AttendanceVerificationService {
             const discountedSessionPrice = this.round2(row.sessionPrice * discountFactor);
             console.log(`💰 Recalculating ${row.customerName}: ${row.discount} (${discountPercentage}%)`);
             console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
-            const amounts = this.calculateAmounts(discountedSessionPrice, null, 'group');
+            // Find the matching rule for this record
+            const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
+            const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
             return {
                 ...row,
                 discountedSessionPrice: discountedSessionPrice,
