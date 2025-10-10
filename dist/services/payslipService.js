@@ -249,8 +249,7 @@ class PayslipService {
                     doc.restore();
                     return y + baseRowHeight;
                 };
-                const drawRow = (y, cells) => {
-                    // compute row height based on wrapped text
+                const measureRowHeight = (cells) => {
                     doc.fontSize(9);
                     const paddX = 4, paddY = 3;
                     let maxH = baseRowHeight;
@@ -258,24 +257,20 @@ class PayslipService {
                         const h = doc.heightOfString(String(c), { width: colWidths[i] - paddX * 2, lineGap: 1 });
                         maxH = Math.max(maxH, h + paddY * 2);
                     });
-                    // grid box
+                    return maxH;
+                };
+                const drawRow = (y, cells) => {
+                    const paddX = 4, paddY = 3;
+                    const maxH = measureRowHeight(cells);
                     doc.save();
                     doc.strokeColor('#B0B0B0').lineWidth(0.5).rect(left, y, tableWidth, maxH).stroke();
                     doc.fillColor('#000');
-                    // draw wrapped text per cell
                     let x = left; cells.forEach((c, i) => {
                         doc.text(String(c), x + paddX, y + paddY, { width: colWidths[i] - paddX * 2, lineGap: 1 });
                         x += colWidths[i];
                     });
                     doc.restore();
                     return y + maxH;
-                };
-                const ensurePage = (y) => {
-                    if (y + baseRowHeight > pageBottom) {
-                        doc.addPage();
-                        return 100; // reset area for next tables
-                    }
-                    return y;
                 };
                 // PRIVATE SESSION TABLE
                 doc.fontSize(14).text('PRIVATE SESSION REVENUE', { underline: true });
@@ -285,12 +280,24 @@ class PayslipService {
                     y = drawRow(y, ['No private sessions', '', '', '', '']);
                 } else {
                     payslipData.privateSessions.forEach(s => {
-                        y = ensurePage(y);
-                        y = drawRow(y, [s.clientName, s.date, s.sessionType, `€${s.netPricePerSession.toFixed(2)}`, `€${s.yourPay.toFixed(2)}`]);
+                        const cells = [s.clientName, s.date, s.sessionType, `€${s.netPricePerSession.toFixed(2)}`, `€${s.yourPay.toFixed(2)}`];
+                        const need = measureRowHeight(cells) + 2;
+                        if (y + need > pageBottom - 12) {
+                            doc.addPage();
+                            doc.fontSize(14).text('PRIVATE SESSION REVENUE', { underline: true });
+                            y = doc.y + 8;
+                            y = drawHeaderRow(y, ['CLIENT NAME','DATE','SESSION TYPE','NET PRICE','YOUR PAY']);
+                        }
+                        y = drawRow(y, cells);
                     });
                 }
                 // Private total row (dark)
-                y = ensurePage(y);
+                if (y + baseRowHeight > pageBottom - 12) {
+                    doc.addPage();
+                    doc.fontSize(14).text('PRIVATE SESSION REVENUE', { underline: true });
+                    y = doc.y + 8;
+                    y = drawHeaderRow(y, ['CLIENT NAME','DATE','SESSION TYPE','NET PRICE','YOUR PAY']);
+                }
                 doc.save();
                 doc.rect(left, y, tableWidth, baseRowHeight).fill('#111827');
                 doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3] + 4, y + 4);
@@ -305,12 +312,24 @@ class PayslipService {
                     y = drawRow(y, ['No group sessions', '', '', '', '']);
                 } else {
                     payslipData.groupSessions.forEach(s => {
-                        y = ensurePage(y);
-                        y = drawRow(y, [s.clientName, s.date, s.classType, s.membershipUsed, `€${s.yourPay.toFixed(2)}`]);
+                        const cells = [s.clientName, s.date, s.classType, s.membershipUsed, `€${s.yourPay.toFixed(2)}`];
+                        const need = measureRowHeight(cells) + 2;
+                        if (y + need > pageBottom - 12) {
+                            doc.addPage();
+                            doc.fontSize(14).text('GROUP SESSION REVENUE', { underline: true });
+                            y = doc.y + 8;
+                            y = drawHeaderRow(y, ['CLIENT NAME','DATE','CLASS TYPE','MEMBERSHIP','YOUR PAY']);
+                        }
+                        y = drawRow(y, cells);
                     });
                 }
                 // Group total row (dark)
-                y = ensurePage(y);
+                if (y + baseRowHeight > pageBottom - 12) {
+                    doc.addPage();
+                    doc.fontSize(14).text('GROUP SESSION REVENUE', { underline: true });
+                    y = doc.y + 8;
+                    y = drawHeaderRow(y, ['CLIENT NAME','DATE','CLASS TYPE','MEMBERSHIP','YOUR PAY']);
+                }
                 doc.save();
                 doc.rect(left, y, tableWidth, baseRowHeight).fill('#111827');
                 doc.fillColor('#F9FAFB').fontSize(10).text('TOTAL', cols[3] + 4, y + 4);

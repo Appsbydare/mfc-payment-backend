@@ -109,7 +109,7 @@ async function renderPDF(payload) {
     doc.restore();
     return y + baseRowHeight;
   };
-  const drawRow = (y, cells) => {
+  const measureRowHeight = (cells) => {
     doc.fontSize(9);
     const paddX = 4, paddY = 3;
     let maxH = baseRowHeight;
@@ -117,6 +117,11 @@ async function renderPDF(payload) {
       const h = doc.heightOfString(String(c), { width: colWidths[i] - paddX * 2, lineGap: 1 });
       maxH = Math.max(maxH, h + paddY * 2);
     });
+    return maxH;
+  };
+  const drawRow = (y, cells) => {
+    const paddX = 4, paddY = 3;
+    const maxH = measureRowHeight(cells);
     doc.save();
     doc.strokeColor("#B0B0B0").lineWidth(0.5).rect(left, y, tableWidth, maxH).stroke();
     doc.fillColor("#000");
@@ -156,11 +161,23 @@ async function renderPDF(payload) {
     y = drawRow(y, ["No private sessions", "", "", "", ""]);
   } else {
     privateSessions.forEach((s) => {
-      y = ensurePage(y);
-      y = drawRow(y, [s.clientName, s.date, s.sessionType, formatCurrency(s.netPricePerSession), formatCurrency(s.yourPay)]);
+      const cells = [s.clientName, s.date, s.sessionType, formatCurrency(s.netPricePerSession), formatCurrency(s.yourPay)];
+      const need = measureRowHeight(cells) + 2;
+      if (y + need > pageBottom - 12) {
+        doc.addPage();
+        doc.fontSize(14).text("PRIVATE SESSION REVENUE", { underline: true });
+        y = doc.y + 8;
+        y = drawHeaderRow(y, ["CLIENT NAME","DATE","SESSION TYPE","NET PRICE","YOUR PAY"]);
+      }
+      y = drawRow(y, cells);
     });
   }
-  y = ensurePage(y);
+  if (y + baseRowHeight > pageBottom - 12) {
+    doc.addPage();
+    doc.fontSize(14).text("PRIVATE SESSION REVENUE", { underline: true });
+    y = doc.y + 8;
+    y = drawHeaderRow(y, ["CLIENT NAME","DATE","SESSION TYPE","NET PRICE","YOUR PAY"]);
+  }
   doc.save();
   doc.rect(left, y, tableWidth, baseRowHeight).fill("#111827");
   doc.fillColor("#F9FAFB").fontSize(10).text("TOTAL", cols[3] + 4, y + 4);
@@ -176,11 +193,23 @@ async function renderPDF(payload) {
     y = drawRow(y, ["No group sessions", "", "", "", ""]);
   } else {
     groupSessions.forEach((s) => {
-      y = ensurePage(y);
-      y = drawRow(y, [s.clientName, s.date, s.classType, s.membershipUsed, formatCurrency(s.yourPay)]);
+      const cells = [s.clientName, s.date, s.classType, s.membershipUsed, formatCurrency(s.yourPay)];
+      const need = measureRowHeight(cells) + 2;
+      if (y + need > pageBottom - 12) {
+        doc.addPage();
+        doc.fontSize(14).text("GROUP SESSION REVENUE", { underline: true });
+        y = doc.y + 8;
+        y = drawHeaderRow(y, ["CLIENT NAME","DATE","CLASS TYPE","MEMBERSHIP","YOUR PAY"]);
+      }
+      y = drawRow(y, cells);
     });
   }
-  y = ensurePage(y);
+  if (y + baseRowHeight > pageBottom - 12) {
+    doc.addPage();
+    doc.fontSize(14).text("GROUP SESSION REVENUE", { underline: true });
+    y = doc.y + 8;
+    y = drawHeaderRow(y, ["CLIENT NAME","DATE","CLASS TYPE","MEMBERSHIP","YOUR PAY"]);
+  }
   doc.save();
   doc.rect(left, y, tableWidth, baseRowHeight).fill("#111827");
   doc.fillColor("#F9FAFB").fontSize(10).text("TOTAL", cols[3] + 4, y + 4);
