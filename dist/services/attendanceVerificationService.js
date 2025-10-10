@@ -186,9 +186,12 @@ class AttendanceVerificationService {
             masterData = await this.recalculateDiscountedAmounts(masterData);
             const recalculatedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
             console.log(`✅ Step 3: Amount recalculation completed - ${recalculatedCount} records recalculated`);
-            console.log('📋 Step 4: Writing final data to database...');
+            console.log('📋 Step 4: Re-verifying invoices with discounted amounts (memory only)...');
+            masterData = await this.reverifyInvoicesWithDiscountedAmounts(masterData, payments, discounts);
+            console.log('✅ Step 4: Invoice re-verification completed');
+            console.log('📋 Step 5: Writing final data to database...');
             await this.saveMasterData(masterData);
-            console.log('✅ Step 4: Data written to database successfully');
+            console.log('✅ Step 5: Data written to database successfully');
             const summary = this.calculateSummary(masterData);
             const processingTime = Date.now() - startTime;
             console.log(`🎯 BATCH Verification complete: ${summary.verifiedRecords}/${summary.totalRecords} verified (${summary.verificationRate.toFixed(1)}%)`);
@@ -205,6 +208,78 @@ class AttendanceVerificationService {
         catch (error) {
             console.error('❌ Error in batch verification process:', error);
             throw new Error(`Batch verification failed: ${error?.message || 'Unknown error'}`);
+        }
+    }
+    async reverifyInvoicesWithDiscountedAmounts(masterData, payments, discounts) {
+        console.log('🔄 Re-verifying invoices with discounted session amounts...');
+        try {
+            // Load existing invoice verification data
+            let invoiceVerifications = [];
+            try {
+                invoiceVerifications = await invoiceVerificationService_1.invoiceVerificationService.loadInvoiceVerificationData();
+                console.log(`📊 Loaded ${invoiceVerifications.length} existing invoice verification records`);
+            }
+            catch (error) {
+                console.log('⚠️ Error loading invoice verification data:', error.message);
+                invoiceVerifications = [];
+            }
+
+            // Reset all invoice balances to original amounts
+            const resetInvoices = invoiceVerifications.map(inv => ({
+                ...inv,
+                usedAmount: 0,
+                remainingBalance: inv.totalAmount,
+                status: 'Available',
+                sessionsUsed: 0,
+                lastUsedDate: '',
+                updatedAt: new Date().toISOString()
+            }));
+
+            // Re-verify each record with discounted amounts
+            const updatedMasterData = [];
+            let updatedInvoices = [...resetInvoices];
+
+            for (const record of masterData) {
+                if (record.verificationStatus === 'Verified') {
+                    // Use discounted session price for invoice verification
+                    const discountedAmount = record.discountedSessionPrice || record.sessionPrice;
+                    console.log(`💰 Re-verifying ${record.customerName}: ${record.sessionPrice} → ${discountedAmount} (discounted)`);
+                    
+                    const invoiceResult = await this.useInvoiceForSession(
+                        record.customerName, 
+                        discountedAmount, 
+                        record.eventStartsAt, 
+                        updatedInvoices, 
+                        payments, 
+                        []
+                    );
+                    
+                    updatedInvoices = invoiceResult.updatedInvoices;
+                    
+                    // Update the record with new invoice info
+                    const updatedRecord = {
+                        ...record,
+                        invoiceNumber: invoiceResult.usedInvoiceNumber,
+                        amount: this.round2(discountedAmount), // Use discounted amount as verified amount
+                        paymentDate: invoiceResult.usedPaymentDate
+                    };
+                    
+                    updatedMasterData.push(updatedRecord);
+                } else {
+                    // Keep unverified records as-is
+                    updatedMasterData.push(record);
+                }
+            }
+
+            // Save updated invoice verification data
+            await invoiceVerificationService_1.invoiceVerificationService.saveInvoiceVerificationData(updatedInvoices);
+            console.log('✅ Invoice re-verification completed with discounted amounts');
+            
+            return updatedMasterData;
+        }
+        catch (error) {
+            console.error('❌ Error in invoice re-verification:', error);
+            throw new Error(`Invoice re-verification failed: ${error?.message || 'Unknown error'}`);
         }
     }
     async loadExistingDataOnly() {
@@ -307,22 +382,7 @@ class AttendanceVerificationService {
             else {
                 console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
                 verificationStatus = 'Verified';
-                
-                // Find applicable discount for this payment to get correct discounted session price
-                const sessionPrice = Number(rule.unit_price || 0);
-                let discountedSessionPrice = sessionPrice;
-                
-                if (matchingPayment && discounts && discounts.length > 0) {
-                    const applicableDiscount = await this.findApplicableDiscount(matchingPayment, discounts);
-                    if (applicableDiscount) {
-                        const discountPercentage = Number(applicableDiscount.applicable_percentage || 0);
-                        const discountFactor = 1 - (discountPercentage / 100);
-                        discountedSessionPrice = this.round2(sessionPrice * discountFactor);
-                        console.log(`💰 Found discount: ${applicableDiscount.name} (${discountPercentage}%) - Session Price: ${sessionPrice} → ${discountedSessionPrice}`);
-                    }
-                }
-                
-                const invoiceResult = await this.useInvoiceForSession(customerName, discountedSessionPrice, attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
+                const invoiceResult = await this.useInvoiceForSession(customerName, Number(rule.unit_price || 0), attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
                 updatedInvoices = invoiceResult.updatedInvoices;
                 invoiceNumber = invoiceResult.usedInvoiceNumber;
                 amount = invoiceResult.usedAmount;
@@ -332,7 +392,6 @@ class AttendanceVerificationService {
         else {
             console.log(`❌ No payment match found for ${customerName} with membership "${membershipName}"`);
             verificationStatus = 'Not Verified';
-            invoiceNumber = 'Pending Payment';
         }
         const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
         let rule = null;
@@ -563,15 +622,14 @@ class AttendanceVerificationService {
         };
     }
     // CHANGE NOTE (2025-10-10):
-    // - Set master row Amount = sessionPrice (verified amount)
+    // - Set master row Amount = discounted session price (verified amount)
     // - Allow multi-invoice allocation, oldest-first, joining invoice numbers (e.g. "21, 343")
-    // - Use discounted session price for invoice verification (not full session price)
-    // - Show "Pending Payment" when no invoice is available instead of empty/invoice numbers
+    // - Re-verify invoices AFTER discounts are applied using discounted session prices
+    // - This ensures $289 invoice can cover more sessions with discounted price (23.18 vs 28.97)
     // Revert guide:
+    // - Remove Step 4 (reverifyInvoicesWithDiscountedAmounts) from batchVerificationProcess
     // - Flip ENABLE_INVOICE_SPLIT=false inside useInvoiceForSession()
     // - Restore usedAmount line to read the full payment invoice amount if required
-    // - Remove discount calculation in processAttendanceRecordWithInvoiceTracking
-    // - Change "Pending Payment" back to empty string in Not Verified case
     async useInvoiceForSession(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules) {
         console.log(`💰 Finding appropriate invoice for session (${sessionPrice}) on ${sessionDate} for customer ${customerName}`);
         
@@ -642,7 +700,7 @@ class AttendanceVerificationService {
             }
             return {
                 updatedInvoices,
-                usedInvoiceNumber: 'Pending Payment',
+                usedInvoiceNumber: '',
                 usedAmount: 0,
                 usedPaymentDate: ''
             };
