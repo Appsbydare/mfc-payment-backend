@@ -350,6 +350,7 @@ class AttendanceVerificationService {
             amounts = { coach: 0, bgm: 0, management: 0, mfc: 0 };
         }
         const discountedSessionPrice = sessionPrice;
+        const finalSessionType = (rule && rule.session_type) ? String(rule.session_type).toLowerCase() : sessionType;
         const uniqueKey = this.generateUniqueKey(attendance);
         console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Verification Status=${verificationStatus}, Invoice=${invoiceNumber}`);
         const masterRow = {
@@ -357,6 +358,7 @@ class AttendanceVerificationService {
             eventStartsAt,
             membershipName,
             classType,
+            sessionType: finalSessionType,
             instructors,
             status,
             discount: '',
@@ -877,6 +879,7 @@ class AttendanceVerificationService {
             eventStartsAt: row.eventStartsAt || row['Event Starts At'] || '',
             membershipName: row.membershipName || row['Membership Name'] || '',
             classType: row.classType || row['Class Type'] || row['ClassType'] || '',
+            sessionType: row.sessionType || row['Session Type'] || row['sessionType'] || '',
             instructors: row.instructors || row['Instructors'] || '',
             status: row.status || row['Status'] || '',
             discount: row.discount || row['Discount'] || '',
@@ -960,6 +963,7 @@ class AttendanceVerificationService {
             'Event Starts At': row.eventStartsAt,
             'Membership Name': row.membershipName,
             'Class Type': row.classType,
+            'Session Type': row.sessionType,
             'Instructors': row.instructors,
             'Status': row.status,
             'Discount': row.discount,

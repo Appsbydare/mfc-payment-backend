@@ -373,7 +373,7 @@ router.get('/export', async (req, res) => {
         }
         if (format === 'csv') {
             const headers = [
-                'Customer Name', 'Event Starts At', 'Membership Name', 'Class Type', 'Instructors', 'Status',
+                'Customer Name', 'Event Starts At', 'Membership Name', 'Class Type', 'Session Type', 'Instructors', 'Status',
                 'Discount', 'Discount %', 'Verification Status', 'Invoice #', 'Amount',
                 'Payment Date', 'Session Price', 'Coach Amount', 'BGM Amount', 'Management Amount', 'MFC Amount'
             ];
@@ -384,6 +384,7 @@ router.get('/export', async (req, res) => {
                     `"${row.eventStartsAt}"`,
                     `"${row.membershipName}"`,
                     `"${row.classType || ''}"`,
+                    `"${row.sessionType || ''}"`,
                     `"${row.instructors}"`,
                     `"${row.status}"`,
                     `"${row.discount}"`,
@@ -488,6 +489,7 @@ router.post('/rewrite-master', async (req, res) => {
             'Event Starts At': row['Event Starts At'] || row['eventStartsAt'] || row['Event Starts'] || '',
             'Membership Name': row['Membership Name'] || row['membershipName'] || '',
             'Class Type': row['Class Type'] || row['classType'] || row['ClassType'] || '',
+            'Session Type': row['Session Type'] || row['sessionType'] || '',
             'Instructors': row['Instructors'] || row['instructors'] || '',
             'Status': row['Status'] || row['status'] || '',
             'Discount': row['Discount'] || row['discount'] || '',
@@ -542,6 +544,7 @@ router.post('/upsert-master', async (req, res) => {
             'Event Starts At': r.eventStartsAt ?? r['Event Starts At'] ?? '',
             'Membership Name': r.membershipName ?? r['Membership Name'] ?? '',
             'Class Type': r.classType ?? r['Class Type'] ?? '',
+            'Session Type': r.sessionType ?? r['Session Type'] ?? '',
             'Instructors': r.instructors ?? r['Instructors'] ?? '',
             'Status': r.status ?? r['Status'] ?? '',
             'Discount': r.discount ?? r['Discount'] ?? '',
@@ -568,8 +571,12 @@ router.post('/upsert-master', async (req, res) => {
             if (!key)
                 continue;
             if (byKey.has(key)) {
-                const prev = byKey.get(key);
-                byKey.set(key, { ...prev, ...incoming, 'CreatedAt': prev['CreatedAt'] || incoming['CreatedAt'], 'UpdatedAt': now });
+            const prev = byKey.get(key);
+            byKey.set(key, { ...prev, ...incoming, 
+                'Class Type': incoming['Class Type'] || prev['Class Type'] || '',
+                'Session Type': incoming['Session Type'] || prev['Session Type'] || '',
+                'CreatedAt': prev['CreatedAt'] || incoming['CreatedAt'], 
+                'UpdatedAt': now });
             }
             else {
                 byKey.set(key, incoming);
