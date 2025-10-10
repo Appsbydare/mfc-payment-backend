@@ -79,29 +79,25 @@ class PayslipService {
             const groupSessions = [];
             filteredData.forEach((row) => {
                 const membershipName = row['Membership Name'] || row['membershipName'] || '';
-                const customerName = row['Customer Name'] || row['customerName'] || '';
+                const customerName = row['Customer Name'] || row['Customer'] || row['customer'] || '';
                 const eventDate = row['Event Starts At'] || row['eventStartsAt'] || row.Date || row.date || '';
                 const sessionPrice = parseFloat(row['Session Price'] || row['sessionPrice'] || 0) || 0;
                 const discountedPrice = parseFloat(row['Discounted Session Price'] || row['discountedSessionPrice'] || 0) || 0;
                 const coachAmount = parseFloat(row['Coach Amount'] || row['coachAmount'] || 0) || 0;
-                const sessionData = {
+                const sessionTypeFromSheet = String(row['Session Type'] || row['sessionType'] || '');
+                const classTypeFromSheet = String(row['Class Type'] || row['ClassType'] || row['classType'] || '');
+                const isPrivate = /private/i.test(sessionTypeFromSheet);
+                const base = {
                     clientName: customerName,
                     date: this.formatDate(eventDate),
                     netPricePerSession: discountedPrice > 0 ? discountedPrice : sessionPrice,
                     yourPay: coachAmount
                 };
-                if (this.isPrivateSession(membershipName)) {
-                    privateSessions.push({
-                        ...sessionData,
-                        sessionType: this.getSessionType(membershipName)
-                    });
+                if (isPrivate) {
+                    privateSessions.push({ ...base, sessionType: sessionTypeFromSheet });
                 }
                 else {
-                    groupSessions.push({
-                        ...sessionData,
-                        classType: this.getClassType(membershipName),
-                        membershipUsed: membershipName
-                    });
+                    groupSessions.push({ ...base, classType: classTypeFromSheet, membershipUsed: membershipName });
                 }
             });
             const totalPrivateRevenue = privateSessions.reduce((sum, session) => sum + session.yourPay, 0);

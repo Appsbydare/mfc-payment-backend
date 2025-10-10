@@ -6,25 +6,27 @@ function normalizeDate(row) {
   return row["Event Starts At"] || row["eventStartsAt"] || row["Date"] || row["date"] || "";
 }
 
-function isPrivate(membershipName = "") {
-  const s = String(membershipName).toLowerCase();
-  return s.includes("private") || s.includes("1 to 1") || s.includes("one to one");
+function isPrivateBySessionType(sessionType = "") {
+  return /private/i.test(String(sessionType));
 }
 
 function mapSession(row, amountField) {
   const membership = row["Membership Name"] || row["membershipName"] || "";
   const customer = row["Customer Name"] || row["Customer"] || row["customer"] || "";
   const date = normalizeDate(row);
+  const sessionType = row["Session Type"] || row["sessionType"] || "";
+  const classType = row["Class Type"] || row["ClassType"] || row["classType"] || "";
   const sessionPrice = parseFloat(row["Session Price"] || row["sessionPrice"] || 0) || 0;
   const discounted = parseFloat(row["Discounted Session Price"] || row["discountedSessionPrice"] || 0) || 0;
   const yourPay = parseFloat(row[amountField] || row[amountField.replace(" ","").toLowerCase()] || 0) || 0;
   const net = discounted > 0 ? discounted : sessionPrice;
+  const isPriv = isPrivateBySessionType(sessionType);
   return {
     clientName: customer,
     date,
-    sessionType: isPrivate(membership) ? (membership.includes("Group") ? "Group Private Session" : "1 to 1 Private Combat Session") : "",
-    classType: isPrivate(membership) ? "" : (membership.toLowerCase().includes("strikezone") ? "STRIKEZONE (13-17) LEADE" : "MMA"),
-    membershipUsed: isPrivate(membership) ? "" : membership,
+    sessionType: isPriv ? sessionType : "",
+    classType: isPriv ? "" : String(classType),
+    membershipUsed: isPriv ? "" : String(membership),
     netPricePerSession: net,
     yourPay,
   };
