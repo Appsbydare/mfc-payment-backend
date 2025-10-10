@@ -99,7 +99,9 @@ class PayslipService {
                     yourPay: coachAmount
                 };
                 if (isPrivate) {
-                    privateSessions.push({ ...base, sessionType: sessionTypeFromSheet });
+                    // For private, display the package/membership name instead of raw 'private'
+                    const displayType = membershipName || sessionTypeFromSheet || 'Private Session';
+                    privateSessions.push({ ...base, sessionType: displayType });
                 }
                 else {
                     groupSessions.push({ ...base, classType: classTypeFromSheet, membershipUsed: membershipName });
