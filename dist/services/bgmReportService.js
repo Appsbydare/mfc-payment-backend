@@ -11,21 +11,26 @@ function isPrivateBySessionType(sessionType = "") {
 }
 
 function mapSession(row, amountField) {
-  const membership = row["Membership Name"] || row["membershipName"] || "";
-  const customer = row["Customer Name"] || row["Customer"] || row["customer"] || "";
+  const get = (keys, fb = '') => (keys.find(k => row[k] !== undefined) ? row[keys.find(k => row[k] !== undefined)] : fb);
+  const membership = get(["Membership Name","membershipName"], "");
+  const customer = get(["Customer Name","Customer","customer"], "");
   const date = normalizeDate(row);
-  const sessionType = row["Session Type"] || row["sessionType"] || "";
-  const classType = row["Class Type"] || row["ClassType"] || row["classType"] || "";
+  const sessionType = String(get(["Session Type","sessionType"], ""));
+  let classType = String(get(["Class Type","ClassType","classType","Class Name","ClassName","className"], ""));
   const sessionPrice = parseFloat(row["Session Price"] || row["sessionPrice"] || 0) || 0;
   const discounted = parseFloat(row["Discounted Session Price"] || row["discountedSessionPrice"] || 0) || 0;
   const yourPay = parseFloat(row[amountField] || row[amountField.replace(" ","").toLowerCase()] || 0) || 0;
   const net = discounted > 0 ? discounted : sessionPrice;
   const isPriv = isPrivateBySessionType(sessionType);
+  // Fallback: if classType missing for group rows, infer lightly from membership
+  if (!isPriv && !classType) {
+    classType = /strike/i.test(membership) ? 'STRIKEZONE' : 'MMA';
+  }
   return {
     clientName: customer,
     date,
     sessionType: isPriv ? sessionType : "",
-    classType: isPriv ? "" : String(classType),
+    classType: isPriv ? "" : classType,
     membershipUsed: isPriv ? "" : String(membership),
     netPricePerSession: net,
     yourPay,
