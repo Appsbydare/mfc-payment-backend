@@ -28,7 +28,8 @@ function mapSession(row, amountField) {
   return {
     clientName: customer,
     date,
-    sessionType: isPriv ? sessionType : "",
+    // For private rows, display membership/package name instead of literal 'private'
+    sessionType: isPriv ? String(membership) : "",
     classType: isPriv ? "" : classType,
     membershipUsed: isPriv ? "" : String(membership),
     netPricePerSession: net,
