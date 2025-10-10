@@ -86,7 +86,12 @@ class PayslipService {
                 const coachAmount = parseFloat(row['Coach Amount'] || row['coachAmount'] || 0) || 0;
                 const sessionTypeFromSheet = String(row['Session Type'] || row['sessionType'] || '');
                 const classTypeFromSheet = String(row['Class Type'] || row['ClassType'] || row['classType'] || '');
-                const isPrivate = /private/i.test(sessionTypeFromSheet);
+                // Decide grouping: prefer explicit Session Type, fallback to membership name keywords
+                let isPrivate = /private/i.test(sessionTypeFromSheet);
+                if (!sessionTypeFromSheet) {
+                    const m = String(membershipName || '').toLowerCase();
+                    isPrivate = /(private|1 to 1|one to one)/i.test(m);
+                }
                 const base = {
                     clientName: customerName,
                     date: this.formatDate(eventDate),
