@@ -546,64 +546,94 @@ class AttendanceVerificationService {
             mfc: (sessionPrice * rule.mfc_percentage) / 100
         };
     }
+    // CHANGE NOTE (2025-10-10):
+    // - Set master row Amount = sessionPrice (verified amount)
+    // - Allow multi-invoice allocation, oldest-first, joining invoice numbers (e.g. "21, 343")
+    // Revert guide:
+    // - Flip ENABLE_INVOICE_SPLIT=false inside useInvoiceForSession()
+    // - Restore usedAmount line to read the full payment invoice amount if required
     async useInvoiceForSession(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules) {
         console.log(`💰 Finding appropriate invoice for session (${sessionPrice}) on ${sessionDate} for customer ${customerName}`);
-        const bestInvoice = await this.findBestAvailableInvoice(customerName, sessionPrice, sessionDate, invoiceVerifications, payments, rules);
-        if (!bestInvoice) {
-            console.log(`❌ No available invoice found for customer ${customerName}, trying fallback approach`);
+        
+        const ENABLE_INVOICE_SPLIT = true; // Set to false to fully revert this change quickly
+        
+        let remaining = this.round2(sessionPrice);
+        const usedInvoices = [];
+        await this.ensureAllInvoicesInVerification(this.normalizeCustomerName(customerName), invoiceVerifications, payments, rules);
+
+        // Oldest-first invoices for this customer
+        const customerInvoices = invoiceVerifications
+            .filter(inv => inv.customerName === this.normalizeCustomerName(customerName) && inv.status !== 'Fully Used')
+            .sort((a, b) => {
+                const pa = payments.find(p => p.Invoice === a.invoiceNumber);
+                const pb = payments.find(p => p.Invoice === b.invoiceNumber);
+                if (!pa || !pb) return 0;
+                return new Date(pa.Date).getTime() - new Date(pb.Date).getTime();
+            });
+
+        let updatedInvoices = invoiceVerifications.map(inv => ({ ...inv }));
+        for (const inv of customerInvoices) {
+            if (remaining <= 0) break;
+            const invoiceRecord = updatedInvoices.find(i => i.invoiceNumber === inv.invoiceNumber);
+            if (!invoiceRecord) continue;
+
+            const available = this.round2(invoiceRecord.remainingBalance);
+            if (available <= 0) continue;
+
+            const canUse = ENABLE_INVOICE_SPLIT ? Math.min(available, remaining) : (available >= remaining ? remaining : 0);
+            if (canUse <= 0) continue;
+
+            invoiceRecord.usedAmount = this.round2(invoiceRecord.usedAmount + canUse);
+            invoiceRecord.remainingBalance = this.round2(invoiceRecord.remainingBalance - canUse);
+            invoiceRecord.sessionsUsed = (invoiceRecord.sessionsUsed || 0) + 1;
+            invoiceRecord.status = invoiceRecord.remainingBalance <= 0 ? 'Fully Used' : 'Partially Used';
+            invoiceRecord.lastUsedDate = new Date().toISOString();
+            invoiceRecord.updatedAt = new Date().toISOString();
+
+            usedInvoices.push(String(invoiceRecord.invoiceNumber));
+            remaining = this.round2(remaining - canUse);
+
+            if (!ENABLE_INVOICE_SPLIT && remaining > 0) {
+                // If splitting disabled and insufficient, fail this invoice to try fallback
+                usedInvoices.pop();
+                // Roll back
+                invoiceRecord.usedAmount = this.round2(invoiceRecord.usedAmount - canUse);
+                invoiceRecord.remainingBalance = this.round2(invoiceRecord.remainingBalance + canUse);
+                invoiceRecord.sessionsUsed = Math.max(0, invoiceRecord.sessionsUsed - 1);
+            }
+        }
+
+        if (usedInvoices.length === 0) {
+            // Smarter fallback: pick oldest positive payment with amount >= session price
             const normalizedCustomer = this.normalizeCustomerName(customerName);
             const customerPayments = payments.filter(p => this.normalizeCustomerName(p.Customer) === normalizedCustomer);
-            if (customerPayments.length > 0) {
-                const fallbackPayment = customerPayments[0];
+            const fallbackCandidates = customerPayments
+                .filter(p => Number(p.Amount || 0) > 0)
+                .sort((a, b) => new Date(a.Date).getTime() - new Date(b.Date).getTime());
+            const fallbackPayment = fallbackCandidates.find(p => Number(p.Amount || 0) >= sessionPrice) || fallbackCandidates[0];
+            if (fallbackPayment) {
                 console.log(`🔄 Using fallback payment: Invoice ${fallbackPayment.Invoice}`);
                 return {
-                    updatedInvoices: invoiceVerifications,
-                    usedInvoiceNumber: fallbackPayment.Invoice,
-                    usedAmount: Number(fallbackPayment.Amount || 0),
+                    updatedInvoices,
+                    usedInvoiceNumber: String(fallbackPayment.Invoice),
+                    usedAmount: this.round2(sessionPrice),
                     usedPaymentDate: fallbackPayment.Date
                 };
             }
             return {
-                updatedInvoices: invoiceVerifications,
+                updatedInvoices,
                 usedInvoiceNumber: '',
                 usedAmount: 0,
                 usedPaymentDate: ''
             };
         }
-        console.log(`✅ Using invoice ${bestInvoice.invoiceNumber} for session`);
-        const newUsedAmount = this.round2(bestInvoice.usedAmount + sessionPrice);
-        const newRemainingBalance = this.round2(bestInvoice.remainingBalance - sessionPrice);
-        const newSessionsUsed = bestInvoice.sessionsUsed + 1;
-        let newStatus = 'Available';
-        if (newRemainingBalance <= 0) {
-            newStatus = 'Fully Used';
-        }
-        else if (newUsedAmount > 0) {
-            newStatus = 'Partially Used';
-        }
-        const updatedInvoices = invoiceVerifications.map(inv => {
-            if (inv.invoiceNumber === bestInvoice.invoiceNumber) {
-                return {
-                    ...inv,
-                    usedAmount: newUsedAmount,
-                    remainingBalance: newRemainingBalance,
-                    sessionsUsed: newSessionsUsed,
-                    status: newStatus,
-                    lastUsedDate: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                };
-            }
-            return inv;
-        });
-        const paymentRecord = payments.find(p => p.Invoice === bestInvoice.invoiceNumber);
-        const usedAmount = paymentRecord ? Number(paymentRecord.Amount || 0) : 0;
-        const usedPaymentDate = paymentRecord ? paymentRecord.Date : '';
-        console.log(`✅ Updated invoice ${bestInvoice.invoiceNumber}: Sessions ${newSessionsUsed}/${bestInvoice.totalSessions}, Balance: ${newRemainingBalance}`);
+
+        console.log(`✅ Updated invoices ${usedInvoices.join(', ')}: Used ${sessionPrice} across ${usedInvoices.length} invoice(s)`);
         return {
             updatedInvoices,
-            usedInvoiceNumber: bestInvoice.invoiceNumber,
-            usedAmount,
-            usedPaymentDate
+            usedInvoiceNumber: usedInvoices.join(', '), // e.g. "21, 343"
+            usedAmount: this.round2(sessionPrice),
+            usedPaymentDate: '' // optional: could set from the most recent invoice in usedInvoices
         };
     }
     async findBestAvailableInvoice(customerName, requiredAmount, sessionDate, invoiceVerifications, payments, rules) {
