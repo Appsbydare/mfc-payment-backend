@@ -280,6 +280,7 @@ class AttendanceVerificationService {
         const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
         const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
         const membershipName = this.getField(attendance, ['Membership Name', 'Membership', 'MembershipName']) || '';
+        const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
         const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
         const status = this.getField(attendance, ['Status']) || '';
         console.log(`🔍 Processing: ${customerName} - ${membershipName}`);
@@ -355,6 +356,7 @@ class AttendanceVerificationService {
             customerName,
             eventStartsAt,
             membershipName,
+            classType,
             instructors,
             status,
             discount: '',
@@ -874,6 +876,7 @@ class AttendanceVerificationService {
             customerName: row.customerName || row['Customer Name'] || '',
             eventStartsAt: row.eventStartsAt || row['Event Starts At'] || '',
             membershipName: row.membershipName || row['Membership Name'] || '',
+            classType: row.classType || row['Class Type'] || row['ClassType'] || '',
             instructors: row.instructors || row['Instructors'] || '',
             status: row.status || row['Status'] || '',
             discount: row.discount || row['Discount'] || '',
@@ -956,6 +959,7 @@ class AttendanceVerificationService {
             'Customer Name': row.customerName,
             'Event Starts At': row.eventStartsAt,
             'Membership Name': row.membershipName,
+            'Class Type': row.classType,
             'Instructors': row.instructors,
             'Status': row.status,
             'Discount': row.discount,
