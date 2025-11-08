@@ -57,20 +57,8 @@ class AttendanceVerificationService {
             amount = Number(payment.Amount || 0);
             paymentDate = payment.Date || '';
             verificationStatus = 'Paid';
-            const net = this.removeTax ? this.removeTax(amount) : Number(amount || 0);
-            const discountInfo = await this.findApplicableDiscount(payment, discounts);
-            let afterDiscount = net;
-            if (discountInfo) {
-                const pct = Number(discountInfo.applicable_percentage || 0);
-                const type = String(discountInfo.coach_payment_type || 'partial').toLowerCase();
-                if (type === 'free')
-                    afterDiscount = 0;
-                else if (type === 'full')
-                    afterDiscount = net;
-                else if (type === 'partial' && pct > 0)
-                    afterDiscount = net * (1 - pct / 100);
-            }
-            sessionPrice = sessionsPerPack > 0 ? this.round2(afterDiscount / sessionsPerPack) : this.round2(afterDiscount);
+            // V2 verification: session price based purely on paid amount and package sessions
+            sessionPrice = sessionsPerPack > 0 ? this.round2(amount / sessionsPerPack) : this.round2(amount);
             discountedSessionPrice = sessionPrice;
             if (rule) {
                 amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
@@ -1476,13 +1464,13 @@ class AttendanceVerificationService {
             }
             const discountPercentage = Number(matchingDiscount.applicable_percentage || 0);
             console.log(`💰 Adding discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%)`);
-            const base = Number(row.manualSessionPrice || row['Manual Session Price'] || 0) > 0
-                ? Number(row.manualSessionPrice || row['Manual Session Price'] || 0)
-                : (Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0) > 0
-                    ? Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0)
-                    : Number(row.sessionPrice || row['Session Price'] || 0));
-            const discountedSessionPrice = this.round2(base * (1 - discountPercentage / 100));
             const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
+            const sessions = matchingRule && Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0) > 0
+                ? Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0)
+                : 1;
+            const paid = Number(row.amount || 0) || 0;
+            const discountedPaid = this.round2(paid * (1 - discountPercentage / 100));
+            const discountedSessionPrice = sessions > 0 ? this.round2(discountedPaid / sessions) : discountedPaid;
             const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
             return {
                 ...row,
@@ -1507,16 +1495,15 @@ class AttendanceVerificationService {
             }
             const discountPercentage = row.discountPercentage;
             const discountFactor = 1 - (discountPercentage / 100);
-            const base = Number(row.manualSessionPrice || row['Manual Session Price'] || 0) > 0
-                ? Number(row.manualSessionPrice || row['Manual Session Price'] || 0)
-                : (Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0) > 0
-                    ? Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0)
-                    : Number(row.sessionPrice || row['Session Price'] || 0));
-            const discountedSessionPrice = this.round2(base * discountFactor);
+            const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
+            const sessions = matchingRule && Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0) > 0
+                ? Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0)
+                : 1;
+            const paid = Number(row.amount || 0) || 0;
+            const discountedPaid = this.round2(paid * discountFactor);
+            const discountedSessionPrice = sessions > 0 ? this.round2(discountedPaid / sessions) : discountedPaid;
             console.log(`💰 Recalculating ${row.customerName}: ${row.discount} (${discountPercentage}%)`);
             console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
-            // Find the matching rule for this record
-            const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
             const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
             return {
                 ...row,
@@ -1578,13 +1565,11 @@ class AttendanceVerificationService {
             if (!found)
                 return r;
             const factor = 1 - (Number(found.pct) || 0) / 100;
-            const base = Number(r.manualSessionPrice || r['Manual Session Price'] || 0) > 0
-                ? Number(r.manualSessionPrice || r['Manual Session Price'] || 0)
-                : (Number(r.invoiceVerifiedSessionPrice || r['Invoice Verified Session Price'] || 0) > 0
-                    ? Number(r.invoiceVerifiedSessionPrice || r['Invoice Verified Session Price'] || 0)
-                    : Number(r.sessionPrice || r['Session Price'] || 0));
-            const discountedPrice = this.round2(base * factor);
             const rule = this.findMatchingRuleExact(r.membershipName, r.sessionType, rules);
+            const sessions = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0 ? Number(rule.sessions_per_pack || rule.sessions || 0) : 1;
+            const paid = Number(r.amount || 0) || 0;
+            const discountedPaid = this.round2(paid * factor);
+            const discountedPrice = sessions > 0 ? this.round2(discountedPaid / sessions) : discountedPaid;
             const amounts = this.calculateAmounts(discountedPrice, rule, r.sessionType);
             return {
                 ...r,
