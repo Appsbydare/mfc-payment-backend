@@ -83,6 +83,8 @@ class PayslipService {
                 const eventDate = row['Event Starts At'] || row['eventStartsAt'] || row.Date || row.date || '';
                 const sessionPrice = parseFloat(row['Session Price'] || row['sessionPrice'] || 0) || 0;
                 const discountedPrice = parseFloat(row['Discounted Session Price'] || row['discountedSessionPrice'] || 0) || 0;
+                const manualSessionPrice = parseFloat(row['Manual Session Price'] || row['manualSessionPrice'] || 0) || 0;
+                const invoiceVerifiedSessionPrice = parseFloat(row['Invoice Verified Session Price'] || row['invoiceVerifiedSessionPrice'] || 0) || 0;
                 const coachAmount = parseFloat(row['Coach Amount'] || row['coachAmount'] || 0) || 0;
                 const sessionTypeFromSheet = String(row['Session Type'] || row['sessionType'] || '');
                 const classTypeFromSheet = String(row['Class Type'] || row['ClassType'] || row['classType'] || '');
@@ -95,7 +97,11 @@ class PayslipService {
                 const base = {
                     clientName: customerName,
                     date: this.formatDate(eventDate),
-                    netPricePerSession: discountedPrice > 0 ? discountedPrice : sessionPrice,
+                    netPricePerSession: (manualSessionPrice > 0
+                        ? manualSessionPrice
+                        : (invoiceVerifiedSessionPrice > 0
+                            ? invoiceVerifiedSessionPrice
+                            : (discountedPrice > 0 ? discountedPrice : sessionPrice))),
                     yourPay: coachAmount
                 };
                 if (isPrivate) {
