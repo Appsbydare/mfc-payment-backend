@@ -221,8 +221,8 @@ router.post('/add-discounts', async (req, res) => {
                 message: 'No verified data found. Please run verification first.'
             });
         }
-        const { payments, discounts } = await attendanceVerificationService_1.attendanceVerificationService['loadAllData']();
-        const updatedMasterData = await attendanceVerificationService_1.attendanceVerificationService['applyDiscountsToMasterData'](masterData, discounts, payments);
+        const { payments, discounts, rules } = await attendanceVerificationService_1.attendanceVerificationService['loadAllData']();
+        const updatedMasterData = await attendanceVerificationService_1.attendanceVerificationService['applyDiscountsToMasterData'](masterData, discounts, payments, rules);
         await attendanceVerificationService_1.attendanceVerificationService.saveMasterData(updatedMasterData);
         const discountAppliedCount = updatedMasterData.filter(r => r.discount && r.discountPercentage > 0).length;
         console.log(`✅ Add Discounts complete: ${discountAppliedCount} records updated with discounts`);
@@ -254,7 +254,8 @@ router.post('/recalculate-discounts', async (req, res) => {
                 message: 'No verified data found. Please run verification first.'
             });
         }
-        const updatedMasterData = await attendanceVerificationService_1.attendanceVerificationService['recalculateDiscountedAmounts'](masterData);
+        const { rules } = await attendanceVerificationService_1.attendanceVerificationService['loadAllData']();
+        const updatedMasterData = await attendanceVerificationService_1.attendanceVerificationService['recalculateDiscountedAmounts'](masterData, rules);
         await attendanceVerificationService_1.attendanceVerificationService.saveMasterData(updatedMasterData);
         const recalculatedCount = updatedMasterData.filter(r => r.discount && r.discountPercentage > 0).length;
         console.log(`✅ Recalculate Discounts complete: ${recalculatedCount} records recalculated`);
