@@ -1384,15 +1384,23 @@ class AttendanceVerificationService {
             }
             const discountPercentage = Number(matchingDiscount.applicable_percentage || 0);
             console.log(`💰 Adding discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%)`);
+            const base = Number(row.manualSessionPrice || row['Manual Session Price'] || 0) > 0
+                ? Number(row.manualSessionPrice || row['Manual Session Price'] || 0)
+                : (Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0) > 0
+                    ? Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0)
+                    : Number(row.sessionPrice || row['Session Price'] || 0));
+            const discountedSessionPrice = this.round2(base * (1 - discountPercentage / 100));
+            const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
+            const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
             return {
                 ...row,
                 discount: matchingDiscount.name,
                 discountPercentage: discountPercentage,
-                discountedSessionPrice: row.sessionPrice,
-                coachAmount: row.coachAmount,
-                bgmAmount: row.bgmAmount,
-                managementAmount: row.managementAmount,
-                mfcAmount: row.mfcAmount
+                discountedSessionPrice: discountedSessionPrice,
+                coachAmount: this.round2(amounts.coach),
+                bgmAmount: this.round2(amounts.bgm),
+                managementAmount: this.round2(amounts.management),
+                mfcAmount: this.round2(amounts.mfc)
             };
         });
         const discountAppliedCount = updated.filter(r => r.discount && r.discountPercentage > 0).length;
@@ -1407,7 +1415,12 @@ class AttendanceVerificationService {
             }
             const discountPercentage = row.discountPercentage;
             const discountFactor = 1 - (discountPercentage / 100);
-            const discountedSessionPrice = this.round2(row.sessionPrice * discountFactor);
+            const base = Number(row.manualSessionPrice || row['Manual Session Price'] || 0) > 0
+                ? Number(row.manualSessionPrice || row['Manual Session Price'] || 0)
+                : (Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0) > 0
+                    ? Number(row.invoiceVerifiedSessionPrice || row['Invoice Verified Session Price'] || 0)
+                    : Number(row.sessionPrice || row['Session Price'] || 0));
+            const discountedSessionPrice = this.round2(base * discountFactor);
             console.log(`💰 Recalculating ${row.customerName}: ${row.discount} (${discountPercentage}%)`);
             console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
             // Find the matching rule for this record
@@ -1473,6 +1486,14 @@ class AttendanceVerificationService {
             if (!found)
                 return r;
             const factor = 1 - (Number(found.pct) || 0) / 100;
+            const base = Number(r.manualSessionPrice || r['Manual Session Price'] || 0) > 0
+                ? Number(r.manualSessionPrice || r['Manual Session Price'] || 0)
+                : (Number(r.invoiceVerifiedSessionPrice || r['Invoice Verified Session Price'] || 0) > 0
+                    ? Number(r.invoiceVerifiedSessionPrice || r['Invoice Verified Session Price'] || 0)
+                    : Number(r.sessionPrice || r['Session Price'] || 0));
+            const discountedPrice = this.round2(base * factor);
+            const rule = this.findMatchingRuleExact(r.membershipName, r.sessionType, rules);
+            const amounts = this.calculateAmounts(discountedPrice, rule, r.sessionType);
             return {
                 ...r,
                 discount: found.name,
@@ -1480,11 +1501,11 @@ class AttendanceVerificationService {
                 amount: this.round2((r.amount || 0) * factor),
                 packagePrice: r.packagePrice,
                 sessionPrice: r.sessionPrice,
-                discountedSessionPrice: this.round2((r.sessionPrice || 0) * factor),
-                coachAmount: this.round2((r.coachAmount || 0) * factor),
-                bgmAmount: this.round2((r.bgmAmount || 0) * factor),
-                managementAmount: this.round2((r.managementAmount || 0) * factor),
-                mfcAmount: this.round2((r.mfcAmount || 0) * factor)
+                discountedSessionPrice: discountedPrice,
+                coachAmount: this.round2(amounts.coach),
+                bgmAmount: this.round2(amounts.bgm),
+                managementAmount: this.round2(amounts.management),
+                mfcAmount: this.round2(amounts.mfc)
             };
         });
         return updated;

@@ -97,11 +97,11 @@ class PayslipService {
                 const base = {
                     clientName: customerName,
                     date: this.formatDate(eventDate),
-                    netPricePerSession: (manualSessionPrice > 0
-                        ? manualSessionPrice
-                        : (invoiceVerifiedSessionPrice > 0
-                            ? invoiceVerifiedSessionPrice
-                            : (discountedPrice > 0 ? discountedPrice : sessionPrice))),
+                    netPricePerSession: (discountedPrice > 0
+                        ? discountedPrice
+                        : (manualSessionPrice > 0
+                            ? manualSessionPrice
+                            : (invoiceVerifiedSessionPrice > 0 ? invoiceVerifiedSessionPrice : sessionPrice))),
                     yourPay: coachAmount
                 };
                 if (isPrivate) {
