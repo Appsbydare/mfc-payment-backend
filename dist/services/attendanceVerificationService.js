@@ -11,6 +11,98 @@ class AttendanceVerificationService {
         this.RULES_SHEET = 'rules';
         this.DISCOUNTS_SHEET = 'discounts';
     }
+    async verifyAttendanceDataV2(params = {}) {
+        const startTime = Date.now();
+        try {
+            console.log('🔄 Starting V2 verification: payment-match + (paid - tax - discount)/sessions');
+            const { attendance, payments, rules, discounts } = await this.loadAllData();
+            const filteredAttendance = this.filterAttendanceByDate(attendance, params.fromDate, params.toDate);
+            const masterRows = [];
+            for (const att of filteredAttendance) {
+                const row = await this.processAttendanceRecordV2(att, payments, rules, discounts);
+                masterRows.push(row);
+            }
+            if (!params.skipWrite) {
+                await this.saveMasterData(masterRows);
+            }
+            const summary = this.calculateSummary(masterRows);
+            console.log(`✅ V2 verification done: ${summary.totalRecords} records, paid=${summary.verifiedRecords}, time=${Date.now() - startTime}ms`);
+            return { masterRows, summary };
+        }
+        catch (error) {
+            console.error('❌ V2 Verification failed:', error);
+            throw error;
+        }
+    }
+    async processAttendanceRecordV2(attendance, payments, rules, discounts) {
+        const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
+        const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
+        const membershipName = this.getField(attendance, ['Membership Name', 'Membership', 'MembershipName']) || '';
+        const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
+        const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
+        const status = this.getField(attendance, ['Status']) || '';
+        const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
+        const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
+        const sessionsPerPack = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0 ? Number(rule.sessions_per_pack || rule.sessions || 0) : 1;
+        const payment = this.findMatchingPayment(attendance, payments, rules) || this.findMatchingPaymentDirect(customerName, membershipName, payments, rules);
+        let verificationStatus = 'Unpaid';
+        let invoiceNumber = '';
+        let amount = 0;
+        let paymentDate = '';
+        let sessionPrice = 0;
+        let discountedSessionPrice = 0;
+        let amounts = { coach: 0, bgm: 0, management: 0, mfc: 0 };
+        if (payment) {
+            invoiceNumber = String(payment.Invoice || '').trim();
+            amount = Number(payment.Amount || 0);
+            paymentDate = payment.Date || '';
+            verificationStatus = 'Paid';
+            const net = this.removeTax ? this.removeTax(amount) : Number(amount || 0);
+            const discountInfo = await this.findApplicableDiscount(payment, discounts);
+            let afterDiscount = net;
+            if (discountInfo) {
+                const pct = Number(discountInfo.applicable_percentage || 0);
+                const type = String(discountInfo.coach_payment_type || 'partial').toLowerCase();
+                if (type === 'free')
+                    afterDiscount = 0;
+                else if (type === 'full')
+                    afterDiscount = net;
+                else if (type === 'partial' && pct > 0)
+                    afterDiscount = net * (1 - pct / 100);
+            }
+            sessionPrice = sessionsPerPack > 0 ? this.round2(afterDiscount / sessionsPerPack) : this.round2(afterDiscount);
+            discountedSessionPrice = sessionPrice;
+            if (rule) {
+                amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
+            }
+        }
+        const uniqueKey = this.generateUniqueKey(attendance);
+        return {
+            customerName,
+            eventStartsAt,
+            membershipName,
+            classType,
+            sessionType: (rule && rule.session_type) ? String(rule.session_type).toLowerCase() : sessionType,
+            instructors,
+            status,
+            discount: '',
+            discountPercentage: 0,
+            verificationStatus,
+            invoiceNumber,
+            amount,
+            paymentDate,
+            packagePrice: rule ? this.round2(Number(rule.price || 0)) : 0,
+            sessionPrice,
+            discountedSessionPrice,
+            coachAmount: this.round2(amounts.coach),
+            bgmAmount: this.round2(amounts.bgm),
+            managementAmount: this.round2(amounts.management),
+            mfcAmount: this.round2(amounts.mfc),
+            uniqueKey,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+    }
     async verifyAttendanceData(params = {}) {
         const startTime = Date.now();
         let processedCount = 0;

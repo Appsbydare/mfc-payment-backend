@@ -186,6 +186,31 @@ router.post('/verify', async (req, res) => {
         });
     }
 });
+// New verification flow (V2): match payment, write invoice number, compute session price as (Paid - tax - discount)/sessions
+router.post('/verify-v2', async (req, res) => {
+    try {
+        const { fromDate, toDate } = req.body || {};
+        console.log('🔄 Starting V2 verification process...');
+        const result = await attendanceVerificationService_1.attendanceVerificationService.verifyAttendanceDataV2({
+            fromDate,
+            toDate
+        });
+        console.log(`✅ V2 Verification complete: ${result.summary.verifiedRecords || 0}/${result.summary.totalRecords || 0} marked Paid`);
+        res.json({
+            success: true,
+            message: `V2 verification complete. ${result.summary.totalRecords || 0} records processed.`,
+            data: result.masterRows,
+            summary: result.summary
+        });
+    }
+    catch (error) {
+        console.error('Error during V2 verification:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message || 'V2 Verification failed'
+        });
+    }
+});
 router.post('/add-discounts', async (req, res) => {
     try {
         console.log('🔍 Starting Add Discounts process...');
