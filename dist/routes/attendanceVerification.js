@@ -550,9 +550,15 @@ router.post('/upsert-master', async (req, res) => {
             'Discount': r.discount ?? r['Discount'] ?? '',
             'Discount %': r.discountPercentage ?? r['Discount %'] ?? 0,
             'Verification Status': (r.verificationStatus ?? r['Verification Status'] ?? ''),
+            'Price Source': r.priceSource ?? r['Price Source'] ?? '',
             'Invoice #': r.invoiceNumber ?? r['Invoice #'] ?? '',
             'Amount': r.amount ?? r['Amount'] ?? 0,
             'Payment Date': r.paymentDate ?? r['Payment Date'] ?? '',
+            'Invoice Amount': r.invoiceAmount ?? r['Invoice Amount'] ?? 0,
+            'Invoice Net Amount': r.invoiceNetAmount ?? r['Invoice Net Amount'] ?? 0,
+            'Invoice Discounted Amount': r.invoiceDiscountedAmount ?? r['Invoice Discounted Amount'] ?? 0,
+            'Invoice Verified Session Price': r.invoiceVerifiedSessionPrice ?? r['Invoice Verified Session Price'] ?? 0,
+            'Manual Session Price': r.manualSessionPrice ?? r['Manual Session Price'] ?? 0,
             'Package Price': r.packagePrice ?? r['Package Price'] ?? 0,
             'Session Price': r.sessionPrice ?? r['Session Price'] ?? 0,
             'Discounted Session Price': r.discountedSessionPrice ?? r['Discounted Session Price'] ?? 0,
@@ -590,6 +596,49 @@ router.post('/upsert-master', async (req, res) => {
     catch (error) {
         console.error('❌ Error in upsert-master:', error);
         res.status(500).json({ success: false, error: error.message || 'Failed to upsert master rows' });
+    }
+});
+// Manual verification: set manual session price and recompute allocations
+router.post('/manual-verify', async (req, res) => {
+    try {
+        const { uniqueKey, manualSessionPrice } = req.body || {};
+        if (!uniqueKey || manualSessionPrice === undefined || manualSessionPrice === null) {
+            return res.status(400).json({ success: false, error: 'uniqueKey and manualSessionPrice are required' });
+        }
+        const rows = await googleSheets_1.googleSheetsService.readSheet('payment_calc_detail');
+        const rules = await attendanceVerificationService_1.attendanceVerificationService['loadAllData']().then(x => x.rules).catch(() => []);
+        const idx = rows.findIndex(r => String(r['UniqueKey'] || '').trim() === String(uniqueKey).trim());
+        if (idx === -1) {
+            return res.status(404).json({ success: false, error: 'Record not found for given uniqueKey' });
+        }
+        const row = rows[idx];
+        const membershipName = row['Membership Name'] || row['membershipName'] || '';
+        const sessionType = (row['Session Type'] || row['sessionType'] || '').toString().toLowerCase();
+        const rule = attendanceVerificationService_1.attendanceVerificationService['findMatchingRuleExact'](membershipName, sessionType, rules);
+        const price = Number(manualSessionPrice) || 0;
+        const amounts = attendanceVerificationService_1.attendanceVerificationService['calculateAmounts'](price, rule, sessionType || 'group');
+        const now = new Date().toISOString();
+        const updated = {
+            ...row,
+            'Manual Session Price': price,
+            'Price Source': 'manual',
+            'Verification Status': 'Manual Verified',
+            'Discounted Session Price': price,
+            'Amount': price,
+            'Coach Amount': Math.round((amounts.coach || 0) * 100) / 100,
+            'BGM Amount': Math.round((amounts.bgm || 0) * 100) / 100,
+            'Management Amount': Math.round((amounts.management || 0) * 100) / 100,
+            'MFC Amount': Math.round((amounts.mfc || 0) * 100) / 100,
+            'UpdatedAt': now
+        };
+        const newRows = rows.slice();
+        newRows[idx] = updated;
+        await googleSheets_1.googleSheetsService.writeSheet('payment_calc_detail', newRows);
+        return res.json({ success: true, message: 'Manual verification saved', record: updated });
+    }
+    catch (error) {
+        console.error('❌ Error in manual-verify:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to manual verify' });
     }
 });
 router.get('/invoices', async (req, res) => {

@@ -366,6 +366,13 @@ class AttendanceVerificationService {
         let amount = 0;
         let paymentDate = '';
         let updatedInvoices = invoiceVerifications;
+        // New invoice-derived amounts
+        let invoiceAmountRaw = 0;
+        let invoiceNetAmount = 0;
+        let invoiceDiscountedAmount = 0;
+        let invoiceVerifiedSessionPrice = 0;
+        let priceSource = 'none';
+        let manualSessionPrice = 0;
         if (matchingPayment) {
             console.log(`✅ Payment match found: Invoice=${matchingPayment.Invoice}, Amount=${matchingPayment.Amount}, Memo="${matchingPayment.Memo}"`);
             const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
@@ -373,20 +380,33 @@ class AttendanceVerificationService {
             if (!rule) {
                 console.log(`❌ Package cannot be found in rules: "${membershipName}" (${sessionType})`);
                 verificationStatus = 'Package Cannot be found';
-                const invoiceResult = await this.useInvoiceForSession(customerName, Number(matchingPayment.Amount || 0), attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
+                // Even if rule is missing, prepare invoice fields so the row carries invoice context
+                invoiceAmountRaw = Number(matchingPayment.Amount || 0);
+                invoiceNetAmount = this.removeTax ? this.removeTax(invoiceAmountRaw) : Number(invoiceAmountRaw);
+                const discountInfo = await this.findApplicableDiscount(matchingPayment, discounts);
+                invoiceDiscountedAmount = this.round2(this.calculateDiscountedSessionPrice({ rule: null, discountInfo, baseAmount: invoiceNetAmount }));
+                invoiceVerifiedSessionPrice = invoiceDiscountedAmount || invoiceNetAmount;
+                const invoiceResult = await this.useInvoiceForSession(customerName, Number(invoiceVerifiedSessionPrice || 0), attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
                 updatedInvoices = invoiceResult.updatedInvoices;
                 invoiceNumber = invoiceResult.usedInvoiceNumber;
-                amount = invoiceResult.usedAmount;
+                amount = this.round2(invoiceVerifiedSessionPrice || 0);
                 paymentDate = invoiceResult.usedPaymentDate;
                 console.log(`📋 Package cannot be found but invoice tracking maintained: Invoice=${invoiceNumber}`);
             }
             else {
                 console.log(`✅ Rule found: ${rule.rule_name} - Package Price: ${rule.price}, Session Price: ${rule.unit_price}`);
                 verificationStatus = 'Verified';
-                const invoiceResult = await this.useInvoiceForSession(customerName, Number(rule.unit_price || 0), attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
+                // Compute invoice-based price (do not use rule/unit price for payouts)
+                invoiceAmountRaw = Number(matchingPayment.Amount || 0);
+                invoiceNetAmount = this.removeTax ? this.removeTax(invoiceAmountRaw) : Number(invoiceAmountRaw);
+                const discountInfo = await this.findApplicableDiscount(matchingPayment, discounts);
+                invoiceDiscountedAmount = this.round2(this.calculateDiscountedSessionPrice({ rule: null, discountInfo, baseAmount: invoiceNetAmount }));
+                invoiceVerifiedSessionPrice = invoiceDiscountedAmount || invoiceNetAmount;
+                priceSource = 'invoice';
+                const invoiceResult = await this.useInvoiceForSession(customerName, Number(invoiceVerifiedSessionPrice || 0), attendance['Event Starts at'] || '', invoiceVerifications, payments, rules);
                 updatedInvoices = invoiceResult.updatedInvoices;
                 invoiceNumber = invoiceResult.usedInvoiceNumber;
-                amount = invoiceResult.usedAmount;
+                amount = this.round2(invoiceVerifiedSessionPrice || 0);
                 paymentDate = invoiceResult.usedPaymentDate;
             }
         }
@@ -409,7 +429,8 @@ class AttendanceVerificationService {
             if (rule) {
                 packagePrice = this.round2(Number(rule.price || 0));
                 sessionPrice = this.round2(Number(rule.unit_price || 0));
-                const discountedSessionPrice = sessionPrice;
+                // Use invoiceVerifiedSessionPrice for payouts/allocations
+                const discountedSessionPrice = this.round2(invoiceVerifiedSessionPrice || 0);
                 amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
             }
             else {
@@ -425,7 +446,8 @@ class AttendanceVerificationService {
             sessionPrice = 0;
             amounts = { coach: 0, bgm: 0, management: 0, mfc: 0 };
         }
-        const discountedSessionPrice = sessionPrice;
+        // Persist discountedSessionPrice as the invoice-derived value when available
+        const discountedSessionPrice = this.round2(invoiceVerifiedSessionPrice || 0);
         const finalSessionType = (rule && rule.session_type) ? String(rule.session_type).toLowerCase() : sessionType;
         const uniqueKey = this.generateUniqueKey(attendance);
         console.log(`🎯 FINAL VALUES: Session Price=${sessionPrice}, Package Price=${packagePrice}, Verification Status=${verificationStatus}, Invoice=${invoiceNumber}`);
@@ -440,9 +462,15 @@ class AttendanceVerificationService {
             discount: '',
             discountPercentage: 0,
             verificationStatus,
+            priceSource,
             invoiceNumber,
             amount,
             paymentDate,
+            invoiceAmount: this.round2(invoiceAmountRaw || 0),
+            invoiceNetAmount: this.round2(invoiceNetAmount || 0),
+            invoiceDiscountedAmount: this.round2(invoiceDiscountedAmount || 0),
+            invoiceVerifiedSessionPrice: this.round2(invoiceVerifiedSessionPrice || 0),
+            manualSessionPrice: this.round2(manualSessionPrice || 0),
             packagePrice,
             sessionPrice,
             discountedSessionPrice,
@@ -1083,9 +1111,15 @@ class AttendanceVerificationService {
             'Discount': row.discount,
             'Discount %': row.discountPercentage,
             'Verification Status': row.verificationStatus,
+            'Price Source': row.priceSource,
             'Invoice #': row.invoiceNumber,
             'Amount': row.amount,
             'Payment Date': row.paymentDate,
+            'Invoice Amount': row.invoiceAmount,
+            'Invoice Net Amount': row.invoiceNetAmount,
+            'Invoice Discounted Amount': row.invoiceDiscountedAmount,
+            'Invoice Verified Session Price': row.invoiceVerifiedSessionPrice,
+            'Manual Session Price': row.manualSessionPrice,
             'Package Price': row.packagePrice,
             'Session Price': row.sessionPrice,
             'Discounted Session Price': row.discountedSessionPrice,
@@ -1182,6 +1216,13 @@ class AttendanceVerificationService {
     }
     round2(n) {
         return Math.round((n || 0) * 100) / 100;
+    }
+    removeTax(amount) {
+        const rate = Number(process.env.TAX_RATE || 0);
+        const base = Number(amount || 0);
+        if (!rate || rate <= 0)
+            return this.round2(base);
+        return this.round2(base / (1 + rate / 100));
     }
     applyDiscountsByInvoice(master, discounts, payments) {
         if (!discounts || discounts.length === 0) {
