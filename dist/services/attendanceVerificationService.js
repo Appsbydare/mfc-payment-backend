@@ -1408,46 +1408,33 @@ class AttendanceVerificationService {
             let matchingDiscount = null;
             for (const discount of activeDiscounts) {
                 const discountName = String(discount.name || '').trim();
-                if (!discountName)
+                const paymentKeyword = String(discount.payment_memo_keyword || discount.name || '').trim();
+                if (!paymentKeyword)
                     continue;
-                if (memo === discountName) {
-                    matchingDiscount = discount;
-                    console.log(`✅ EXACT discount match found for invoice ${invoice}: "${discountName}"`);
-                    break;
+                
+                const memoLower = memo.toLowerCase();
+                const keywordLower = paymentKeyword.toLowerCase();
+                
+                // Check match based on match_type
+                let isMatch = false;
+                const matchType = String(discount.match_type || 'exact').toLowerCase();
+                
+                if (matchType === 'exact') {
+                    isMatch = memoLower === keywordLower;
+                } else if (matchType === 'contains') {
+                    isMatch = memoLower.includes(keywordLower);
+                } else if (matchType === 'regex') {
+                    try {
+                        const regex = new RegExp(paymentKeyword, 'i');
+                        isMatch = regex.test(memo);
+                    } catch (e) {
+                        console.warn(`⚠️ Invalid regex pattern for discount "${discountName}": ${paymentKeyword}`);
+                    }
                 }
-                if (memo.toLowerCase() === discountName.toLowerCase()) {
+                
+                if (isMatch) {
                     matchingDiscount = discount;
-                    console.log(`✅ CASE-INSENSITIVE discount match found for invoice ${invoice}: "${discountName}"`);
-                    break;
-                }
-                if (memo.toLowerCase().includes(discountName.toLowerCase())) {
-                    matchingDiscount = discount;
-                    console.log(`✅ PARTIAL discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
-                    break;
-                }
-                if (memo.toLowerCase().includes('loyalty') && discountName.toLowerCase().includes('loyalty')) {
-                    matchingDiscount = discount;
-                    console.log(`✅ LOYALTY pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
-                    break;
-                }
-                if (memo.toLowerCase().includes('mindbody') && discountName.toLowerCase().includes('mindbody')) {
-                    matchingDiscount = discount;
-                    console.log(`✅ MINDBODY pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
-                    break;
-                }
-                if (memo.toLowerCase().includes('freedom') && discountName.toLowerCase().includes('freedom')) {
-                    matchingDiscount = discount;
-                    console.log(`✅ FREEDOM pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
-                    break;
-                }
-                if (memo.toLowerCase().includes('staff') && discountName.toLowerCase().includes('staff')) {
-                    matchingDiscount = discount;
-                    console.log(`✅ STAFF pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
-                    break;
-                }
-                if (memo.toLowerCase() === 'boxing discount' && discountName.toLowerCase().includes('boxing')) {
-                    matchingDiscount = discount;
-                    console.log(`✅ BOXING DISCOUNT exact match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+                    console.log(`✅ Discount match found (${matchType}) for invoice ${invoice}: "${discountName}" (keyword: "${paymentKeyword}", memo: "${memo}")`);
                     break;
                 }
             }

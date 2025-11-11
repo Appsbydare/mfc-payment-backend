@@ -48,6 +48,7 @@ router.get('/', async (req, res) => {
                 id: row.id || (index + 1),
                 discount_code: row.discount_code || row['discount_code'] || '',
                 name: row.name || row['name'] || '',
+                payment_memo_keyword: row.payment_memo_keyword || row['payment_memo_keyword'] || row.name || row['name'] || '',
                 applicable_percentage: parseFloat(row.applicable_percentage || row['applicable_percentage'] || '0'),
                 coach_payment_type: (row.coach_payment_type || row['coach_payment_type'] || 'partial').toLowerCase(),
                 match_type: (row.match_type || row['match_type'] || 'exact').toLowerCase(),
@@ -139,7 +140,7 @@ router.post('/extract-from-payments', async (req, res) => {
 });
 router.post('/', async (req, res) => {
     try {
-        const { discount_code, name, applicable_percentage, coach_payment_type, match_type, active, notes } = req.body;
+        const { discount_code, name, payment_memo_keyword, applicable_percentage, coach_payment_type, match_type, active, notes } = req.body;
         if (!discount_code || !name || !coach_payment_type || !match_type) {
             return res.status(400).json({
                 success: false,
@@ -161,6 +162,7 @@ router.post('/', async (req, res) => {
         const newDiscount = await discountService_1.discountService.createDiscount({
             discount_code,
             name,
+            payment_memo_keyword: payment_memo_keyword || name,
             applicable_percentage: applicable_percentage || 0,
             coach_payment_type,
             match_type,
@@ -248,6 +250,7 @@ router.post('/initialize', async (req, res) => {
                     id: 1,
                     discount_code: '30% OFF YOUR FIRST MONTH DISCOUNT',
                     name: '30% First Month Discount Alt',
+                    payment_memo_keyword: '30% First Month Discount Alt',
                     applicable_percentage: 30,
                     coach_payment_type: 'partial',
                     match_type: 'exact',
@@ -260,6 +263,7 @@ router.post('/initialize', async (req, res) => {
                     id: 2,
                     discount_code: 'BGM MULTIPACK DISCOUNT',
                     name: 'BGM Multipack Discount',
+                    payment_memo_keyword: 'BGM Multipack Discount',
                     applicable_percentage: 15,
                     coach_payment_type: 'partial',
                     match_type: 'exact',
@@ -272,6 +276,7 @@ router.post('/initialize', async (req, res) => {
                     id: 3,
                     discount_code: 'BOXING DISCOUNT',
                     name: 'Boxing Discount',
+                    payment_memo_keyword: 'BOXING DISCOUNT',
                     applicable_percentage: 100,
                     coach_payment_type: 'free',
                     match_type: 'exact',
