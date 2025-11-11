@@ -157,16 +157,38 @@ class DiscountService {
     }
     async createDiscount(discount) {
         const newDiscount = {
-            ...discount,
             id: Date.now(),
+            discount_code: discount.discount_code || '',
+            name: discount.name || '',
+            payment_memo_keyword: discount.payment_memo_keyword || discount.name || '',
+            applicable_percentage: discount.applicable_percentage || 0,
+            coach_payment_type: discount.coach_payment_type || 'partial',
+            match_type: discount.match_type || 'exact',
+            active: discount.active !== false,
+            notes: discount.notes || '',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
-        // Append a single row instead of rewriting entire sheet
+        
+        // Read existing data to get column order from sheet
         const existing = await this.googleSheetsService.readSheet('discounts');
-        const headers = existing[0] ? Object.keys(existing[0]) : Object.keys(newDiscount);
-        const rowObject = { ...headers.reduce((o, k) => ({ ...o, [k]: '' }), {}), ...newDiscount };
-        await this.googleSheetsService.appendRow('discounts', rowObject);
+        let headers;
+        if (existing.length > 0) {
+            // Use existing column order from sheet
+            headers = Object.keys(existing[0]);
+        } else {
+            // No existing data, use our defined order
+            headers = ['id', 'discount_code', 'name', 'payment_memo_keyword', 'applicable_percentage', 
+                      'coach_payment_type', 'match_type', 'active', 'notes', 'created_at', 'updated_at'];
+        }
+        
+        // Create row data in correct column order
+        const rowData = {};
+        headers.forEach(header => {
+            rowData[header] = newDiscount[header] !== undefined ? newDiscount[header] : '';
+        });
+        
+        await this.googleSheetsService.appendToSheet('discounts', [rowData]);
         await this.refreshDiscounts();
         return newDiscount;
     }
