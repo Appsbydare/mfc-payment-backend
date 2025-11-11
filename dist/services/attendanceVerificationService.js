@@ -1420,20 +1420,9 @@ class AttendanceVerificationService {
                     console.log(`✅ CASE-INSENSITIVE discount match found for invoice ${invoice}: "${discountName}"`);
                     break;
                 }
-                if (memo.toLowerCase().includes(discountName.toLowerCase()) ||
-                    discountName.toLowerCase().includes(memo.toLowerCase())) {
+                if (memo.toLowerCase().includes(discountName.toLowerCase())) {
                     matchingDiscount = discount;
                     console.log(`✅ PARTIAL discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
-                    break;
-                }
-                const memoWords = memo.toLowerCase().split(/\s+/);
-                const discountWords = discountName.toLowerCase().split(/\s+/);
-                const significantWords = discountWords.filter(word => word.length > 2 &&
-                    !['the', 'and', 'or', 'for', 'with', 'discount', 'pass', 'plan'].includes(word));
-                if (significantWords.length > 0 &&
-                    significantWords.every(word => memoWords.some(memoWord => memoWord.includes(word) || word.includes(memoWord)))) {
-                    matchingDiscount = discount;
-                    console.log(`✅ KEYWORD discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
                     break;
                 }
                 if (memo.toLowerCase().includes('loyalty') && discountName.toLowerCase().includes('loyalty')) {
