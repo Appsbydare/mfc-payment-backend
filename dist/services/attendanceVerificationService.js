@@ -1456,9 +1456,9 @@ class AttendanceVerificationService {
                     console.log(`✅ STAFF pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
                     break;
                 }
-                if (memo.toLowerCase().includes('boxing') && discountName.toLowerCase().includes('boxing')) {
+                if (memo.toLowerCase() === 'boxing discount' && discountName.toLowerCase().includes('boxing')) {
                     matchingDiscount = discount;
-                    console.log(`✅ BOXING pattern match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+                    console.log(`✅ BOXING DISCOUNT exact match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
                     break;
                 }
             }
