@@ -12,13 +12,105 @@ class AttendanceVerificationService {
         this.RULES_SHEET = 'rules';
         this.DISCOUNTS_SHEET = 'discounts';
     }
+    linkAttendanceToInvoices(attendanceRecords, paymentVerificationRows, payments) {
+        console.log('🔄 Linking attendance records to invoices (invoice-driven approach)...');
+        // Create map: customer -> list of attendance records
+        const attendanceByCustomer = new Map();
+        attendanceRecords.forEach(att => {
+            const customerName = this.getField(att, ['Customer Name', 'Customer']) || '';
+            const normalizedCustomer = this.normalizeCustomerName(customerName);
+            if (!normalizedCustomer)
+                return;
+            if (!attendanceByCustomer.has(normalizedCustomer)) {
+                attendanceByCustomer.set(normalizedCustomer, []);
+            }
+            attendanceByCustomer.get(normalizedCustomer).push(att);
+        });
+        // Sort attendance by date for each customer
+        for (const [customer, attList] of attendanceByCustomer.entries()) {
+            attList.sort((a, b) => {
+                const dateA = this.parseDate(this.getField(a, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '') || new Date(0);
+                const dateB = this.parseDate(this.getField(b, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '') || new Date(0);
+                return dateA.getTime() - dateB.getTime();
+            });
+        }
+        // Create map: invoice -> payment info (for getting payment date)
+        const invoiceToPayment = new Map();
+        payments.forEach(payment => {
+            const invoice = String(payment.Invoice || payment.invoice || '').trim();
+            if (invoice) {
+                invoiceToPayment.set(invoice, payment);
+            }
+        });
+        // Create map: attendance -> invoice number
+        const attendanceToInvoice = new Map();
+        // Track which attendance records have been linked
+        const linkedAttendanceKeys = new Set();
+        // Process invoices sorted by date (oldest first to allocate attendance chronologically)
+        const sortedInvoices = paymentVerificationRows
+            .filter(row => {
+                const invoice = String(row.invoice || '').trim();
+                const customer = String(row.customer || '').trim();
+                return invoice && customer;
+            })
+            .sort((a, b) => {
+                const dateA = this.parseDate(a.date || '') || new Date(0);
+                const dateB = this.parseDate(b.date || '') || new Date(0);
+                return dateA.getTime() - dateB.getTime();
+            });
+        for (const invoiceRow of sortedInvoices) {
+            const invoice = String(invoiceRow.invoice || '').trim();
+            const customer = String(invoiceRow.customer || '').trim();
+            const normalizedCustomer = this.normalizeCustomerName(customer);
+            const numberOfSessions = Number(invoiceRow.numberOfSessions || 0);
+            const invoiceDate = this.parseDate(invoiceRow.date || '') || new Date(0);
+            if (!normalizedCustomer || numberOfSessions <= 0) {
+                continue;
+            }
+            const customerAttendance = attendanceByCustomer.get(normalizedCustomer) || [];
+            // Filter out already linked attendance records
+            const availableAttendance = customerAttendance.filter(att => {
+                const key = this.generateUniqueKey(att);
+                return !linkedAttendanceKeys.has(key);
+            });
+            // Sort by proximity to invoice date
+            const attendanceWithDistance = availableAttendance.map(att => {
+                const attDate = this.parseDate(this.getField(att, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '') || new Date(0);
+                const distance = Math.abs(attDate.getTime() - invoiceDate.getTime());
+                return { att, distance, date: attDate };
+            });
+            attendanceWithDistance.sort((a, b) => {
+                // Prefer attendance on or before invoice date
+                const aBefore = a.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
+                const bBefore = b.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
+                if (aBefore !== bBefore) {
+                    return aBefore - bBefore;
+                }
+                // Then by distance
+                return a.distance - b.distance;
+            });
+            // Link up to numberOfSessions attendance records
+            let linkedCount = 0;
+            for (const { att } of attendanceWithDistance) {
+                if (linkedCount >= numberOfSessions) {
+                    break;
+                }
+                const key = this.generateUniqueKey(att);
+                attendanceToInvoice.set(key, invoice);
+                linkedAttendanceKeys.add(key);
+                linkedCount++;
+            }
+            console.log(`📋 Invoice ${invoice} (${customer}): Linked ${linkedCount}/${numberOfSessions} sessions`);
+        }
+        console.log(`✅ Linked ${linkedAttendanceKeys.size} attendance records to invoices`);
+        return attendanceToInvoice;
+    }
     async verifyAttendanceDataV2(params = {}) {
         const startTime = Date.now();
         try {
-            console.log('🔄 Starting simplified verification using payment verification data');
+            console.log('🔄 Starting invoice-driven verification using payment verification data');
             const { attendance, payments, rules } = await this.loadAllData();
             const paymentVerificationRows = await paymentVerificationService_1.paymentVerificationService.getPaymentVerificationTable();
-            const paymentsByCustomer = this.groupPaymentsByCustomer(payments);
             const paymentInfoByInvoice = new Map();
             paymentVerificationRows.forEach(row => {
                 const invoice = String(row.invoice || '').trim();
@@ -34,18 +126,25 @@ class AttendanceVerificationService {
                 return statusLower !== 'late cancelled' && statusLower !== 'registered';
             });
             console.log(`📊 Filtered out ${filteredAttendance.length - validAttendance.length} records with status 'Late Cancelled' or 'Registered'`);
-            const masterRows = validAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice, rules));
+            // Link attendance to invoices (invoice-driven approach)
+            const attendanceToInvoice = this.linkAttendanceToInvoices(validAttendance, paymentVerificationRows, payments);
+            // Build master rows with invoice linkage
+            const masterRows = validAttendance.map(att => {
+                const key = this.generateUniqueKey(att);
+                const invoiceNumber = attendanceToInvoice.get(key) || '';
+                return this.buildSimpleMasterRowWithInvoice(att, invoiceNumber, paymentInfoByInvoice, payments, rules);
+            });
             // Update verification status based on session consumption
             const updatedMasterRows = this.updateVerificationStatusBySessionConsumption(masterRows, paymentVerificationRows);
             if (!params.skipWrite) {
                 await this.saveMasterData(updatedMasterRows);
             }
             const summary = this.calculateSummary(updatedMasterRows);
-            console.log(`✅ Simplified verification complete: ${summary.totalRecords} records processed in ${Date.now() - startTime}ms`);
+            console.log(`✅ Invoice-driven verification complete: ${summary.totalRecords} records processed in ${Date.now() - startTime}ms`);
             return { masterRows: updatedMasterRows, summary };
         }
         catch (error) {
-            console.error('❌ Simplified verification failed:', error);
+            console.error('❌ Invoice-driven verification failed:', error);
             throw error;
         }
     }
@@ -417,6 +516,121 @@ class AttendanceVerificationService {
             }
         }
         return selectedPayment;
+    }
+    buildSimpleMasterRowWithInvoice(attendance, invoiceNumber, paymentInfoByInvoice, payments, rules) {
+        const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
+        const normalizedCustomer = this.normalizeCustomerName(customerName);
+        const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
+        const attendanceDate = this.parseDate(eventStartsAt) || new Date(0);
+        const membershipName = this.getField(attendance, ['Membership Name', 'Membership', 'MembershipName']) || '';
+        const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
+        const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
+        const status = this.getField(attendance, ['Status']) || '';
+        const sessionTypeRaw = this.classifySessionType(attendance['Offering Type Name'] || '');
+        let paymentDate = '';
+        let priceSource = 'unmatched';
+        let verificationStatus = 'Not Verified';
+        let invoiceAmount = 0;
+        let invoiceNetAmount = 0;
+        let invoiceDiscountAmount = 0;
+        let discountMemo = '';
+        let discountPercentage = 0;
+        let numberOfSessions = 0;
+        let taxAmount = 0;
+        // Find payment for this invoice to get payment date
+        const matchedPayment = payments.find(p => String(p.Invoice || p.invoice || '').trim() === String(invoiceNumber).trim());
+        if (matchedPayment) {
+            paymentDate = matchedPayment.Date || matchedPayment.date || '';
+        }
+        if (invoiceNumber) {
+            const invoiceInfo = paymentInfoByInvoice.get(String(invoiceNumber).trim());
+            if (invoiceInfo) {
+                priceSource = 'payment-verification';
+                verificationStatus = 'Verified';
+                if (invoiceInfo.amount !== undefined) {
+                    invoiceAmount = this.round2(Number(invoiceInfo.amount || 0));
+                }
+                if (invoiceInfo.netPrice !== undefined) {
+                    invoiceNetAmount = this.round2(Number(invoiceInfo.netPrice || 0));
+                }
+                if (invoiceInfo.discountAmount !== undefined) {
+                    invoiceDiscountAmount = this.round2(Number(invoiceInfo.discountAmount || 0));
+                }
+                if (invoiceInfo.tax !== undefined) {
+                    taxAmount = this.round2(Number(invoiceInfo.tax || 0));
+                }
+                if (invoiceInfo.numberOfSessions !== undefined) {
+                    numberOfSessions = Number(invoiceInfo.numberOfSessions || 0);
+                }
+                if (invoiceInfo.discountPercentage !== undefined) {
+                    discountPercentage = this.round2(Number(invoiceInfo.discountPercentage || 0));
+                }
+                if (invoiceInfo.discount !== undefined) {
+                    discountMemo = String(invoiceInfo.discount || '');
+                }
+            }
+        }
+        if (taxAmount <= 0 && invoiceAmount > 0 && invoiceNetAmount > 0 && invoiceAmount >= invoiceNetAmount) {
+            taxAmount = this.round2(invoiceAmount - invoiceNetAmount - invoiceDiscountAmount);
+        }
+        if (invoiceNetAmount <= 0) {
+            invoiceNetAmount = invoiceAmount;
+        }
+        if (numberOfSessions <= 0) {
+            numberOfSessions = 1;
+        }
+        const sessionPrice = this.round2(numberOfSessions > 0 ? invoiceNetAmount / numberOfSessions : invoiceNetAmount);
+        const discountedSessionPrice = sessionPrice;
+        const amount = sessionPrice;
+        let coachAmount = 0;
+        let managementAmount = 0;
+        let mfcAmount = 0;
+        const rule = this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
+        if (rule) {
+            const coachPct = Number(rule.coach_percentage || 0);
+            const managementPct = Number(rule.management_percentage || 0);
+            const mfcPct = Number(rule.mfc_percentage || 0);
+            if (coachPct) {
+                coachAmount = this.round2(discountedSessionPrice * (coachPct / 100));
+            }
+            if (managementPct) {
+                managementAmount = this.round2(discountedSessionPrice * (managementPct / 100));
+            }
+            if (mfcPct) {
+                mfcAmount = this.round2(discountedSessionPrice * (mfcPct / 100));
+            }
+        }
+        const uniqueKey = this.generateUniqueKey(attendance);
+        return {
+            customerName,
+            eventStartsAt,
+            membershipName,
+            classType,
+            sessionType: sessionTypeRaw,
+            instructors,
+            status,
+            discount: discountMemo,
+            discountPercentage,
+            verificationStatus,
+            priceSource,
+            invoiceNumber: String(invoiceNumber || '').trim(),
+            amount,
+            paymentDate,
+            tax: this.round2(taxAmount),
+            invoiceAmount: this.round2(invoiceAmount),
+            invoiceNetAmount: this.round2(invoiceNetAmount),
+            invoiceDiscountedAmount: this.round2(invoiceNetAmount),
+            invoiceVerifiedSessionPrice: sessionPrice,
+            manualSessionPrice: 0,
+            numberOfSessions,
+            discountedSessionPrice,
+            coachAmount,
+            managementAmount,
+            mfcAmount,
+            uniqueKey,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
     }
     buildSimpleMasterRow(attendance, paymentsByCustomer, paymentInfoByInvoice, rules) {
         const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
