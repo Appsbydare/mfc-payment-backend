@@ -133,12 +133,15 @@ class AttendanceVerificationService {
             });
             const filteredAttendance = this.filterAttendanceByDate(attendance, params.fromDate, params.toDate);
             // Filter out records with status 'Late Cancelled' or 'Registered' at the beginning of verification
-            const validAttendance = filteredAttendance.filter(att => {
-                const status = this.getField(att, ['Status']) || '';
-                const statusLower = String(status).trim().toLowerCase();
-                return statusLower !== 'late cancelled' && statusLower !== 'registered';
-            });
-            console.log(`📊 Filtered out ${filteredAttendance.length - validAttendance.length} records with status 'Late Cancelled' or 'Registered'`);
+            // COMMENTED OUT: User requested to keep all records regardless of status
+            // const validAttendance = filteredAttendance.filter(att => {
+            //     const status = this.getField(att, ['Status']) || '';
+            //     const statusLower = String(status).trim().toLowerCase();
+            //     return statusLower !== 'late cancelled' && statusLower !== 'registered';
+            // });
+            // console.log(`📊 Filtered out ${filteredAttendance.length - validAttendance.length} records with status 'Late Cancelled' or 'Registered'`);
+            // Use all filtered attendance records (no status filtering)
+            const validAttendance = filteredAttendance;
             // Link attendance to invoices (invoice-driven approach)
             const attendanceToInvoice = this.linkAttendanceToInvoices(validAttendance, paymentVerificationRows, payments);
             // Build master rows with invoice linkage
