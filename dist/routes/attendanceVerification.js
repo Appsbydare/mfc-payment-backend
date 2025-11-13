@@ -40,6 +40,7 @@ const express_1 = __importDefault(require("express"));
 const attendanceVerificationService_1 = require("../services/attendanceVerificationService");
 const invoiceVerificationService_1 = require("../services/invoiceVerificationService");
 const googleSheets_1 = require("../services/googleSheets");
+const paymentVerificationService_1 = require("../services/paymentVerificationService");
 const router = express_1.default.Router();
 router.get('/master', async (req, res) => {
     try {
@@ -718,6 +719,28 @@ router.delete('/invoices', async (req, res) => {
         res.status(500).json({
             success: false,
             error: error.message || 'Failed to clear invoice verification data'
+        });
+    }
+});
+router.get('/payment-verification', async (req, res) => {
+    try {
+        const rows = await paymentVerificationService_1.paymentVerificationService.getPaymentVerificationTable();
+        res.json({
+            success: true,
+            data: rows,
+            summary: {
+                totalInvoices: rows.length,
+                totalFinalPrice: rows.reduce((sum, row) => sum + (row.finalPrice || 0), 0),
+                totalTax: rows.reduce((sum, row) => sum + (row.tax || 0), 0),
+                invoicesWithDiscounts: rows.filter(row => row.discount).length
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error loading payment verification table:', error);
+        res.status(500).json({
+            success: false,
+            error: error?.message || 'Failed to load payment verification table'
         });
     }
 });
