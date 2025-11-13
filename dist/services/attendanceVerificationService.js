@@ -387,6 +387,40 @@ class AttendanceVerificationService {
         const normalizedRules = this.normalizeRules(rawRules);
         return { attendance, payments, rules: normalizedRules, discounts };
     }
+    normalizeDiscountRow(discount) {
+        if (!discount)
+            return null;
+        const id = this.getField(discount, ['id', 'ID']);
+        const name = this.getField(discount, ['name', 'Name']);
+        if (!name)
+            return null;
+        const paymentKeyword = this.getField(discount, ['payment_memo_keyword', 'Payment Memo Keyword']) || name;
+        const discountCode = this.getField(discount, ['discount_code', 'Discount Code']);
+        const matchTypeRaw = this.getField(discount, ['match_type', 'Match Type']) || 'exact';
+        const match_type = String(matchTypeRaw).toLowerCase();
+        const percentageRaw = this.getField(discount, ['applicable_percentage', 'Applicable Percentage']) || '0';
+        const applicable_percentage = Number(percentageRaw) || 0;
+        const coachPaymentType = this.getField(discount, ['coach_payment_type', 'Coach Payment Type']) || 'partial';
+        const activeRaw = this.getField(discount, ['active', 'Active']);
+        let active = true;
+        if (activeRaw !== '') {
+            const str = String(activeRaw).trim().toLowerCase();
+            active = (str === 'true' || str === '1' || str === 'yes');
+        }
+        const notes = this.getField(discount, ['notes', 'Notes']);
+        return {
+            ...discount,
+            id,
+            name,
+            discount_code: discountCode || this.getField(discount, ['discount code']),
+            payment_memo_keyword: paymentKeyword,
+            match_type,
+            applicable_percentage,
+            coach_payment_type: coachPaymentType,
+            active,
+            notes
+        };
+    }
     normalizeRules(rawRules) {
         if (!rawRules || rawRules.length === 0)
             return [];
@@ -1314,15 +1348,9 @@ class AttendanceVerificationService {
             return master;
         }
         console.log(`🔍 Applying discounts to ${master.length} records using memo-based matching`);
-        const activeDiscounts = discounts.filter((d) => {
-            if (!d)
-                return false;
-            const activeValue = this.getField(d, ['active', 'Active']);
-            if (activeValue === '')
-                return false;
-            const str = String(activeValue).trim().toLowerCase();
-            return str === 'true' || str === '1' || str === 'yes';
-        });
+        const activeDiscounts = discounts
+            .map(d => this.normalizeDiscountRow(d))
+            .filter(d => d && d.active);
         console.log(`📊 Found ${activeDiscounts.length} active discounts`);
         console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
         const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
@@ -1342,23 +1370,28 @@ class AttendanceVerificationService {
             console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
             let matchingDiscount = null;
             for (const discount of activeDiscounts) {
-                const discountName = String(discount.name || '').trim();
-                if (!discountName)
+                const keyword = String(discount.payment_memo_keyword || discount.name || '').trim();
+                if (!keyword)
                     continue;
-                if (memo === discountName) {
-                    matchingDiscount = discount;
-                    console.log(`✅ EXACT discount match found for invoice ${invoice}: "${discountName}"`);
-                    break;
+                const matchType = discount.match_type || 'exact';
+                let isMatch = false;
+                if (matchType === 'exact') {
+                    isMatch = memo.toLowerCase() === keyword.toLowerCase();
                 }
-                if (memo.toLowerCase() === discountName.toLowerCase()) {
-                    matchingDiscount = discount;
-                    console.log(`✅ CASE-INSENSITIVE discount match found for invoice ${invoice}: "${discountName}"`);
-                    break;
+                else if (matchType === 'contains') {
+                    isMatch = memo.toLowerCase().includes(keyword.toLowerCase());
                 }
-                if (memo.toLowerCase().includes(discountName.toLowerCase()) ||
-                    discountName.toLowerCase().includes(memo.toLowerCase())) {
+                else if (matchType === 'regex') {
+                    try {
+                        isMatch = new RegExp(keyword, 'i').test(memo);
+                    }
+                    catch (err) {
+                        console.warn(`⚠️ Invalid regex for discount ${discount.name}: ${keyword}`, err);
+                    }
+                }
+                if (isMatch) {
                     matchingDiscount = discount;
-                    console.log(`✅ PARTIAL discount match found for invoice ${invoice}: "${discountName}" (memo: "${memo}")`);
+                    console.log(`✅ ${matchType.toUpperCase()} discount match found for invoice ${invoice}: "${discount.name}" (keyword: "${keyword}", memo: "${memo}")`);
                     break;
                 }
             }
@@ -1395,15 +1428,9 @@ class AttendanceVerificationService {
             console.log(`⚠️ No discounts available to apply`);
             return masterData;
         }
-        const activeDiscounts = discounts.filter((d) => {
-            if (!d)
-                return false;
-            const activeValue = this.getField(d, ['active', 'Active']);
-            if (activeValue === '')
-                return false;
-            const str = String(activeValue).trim().toLowerCase();
-            return str === 'true' || str === '1' || str === 'yes';
-        });
+        const activeDiscounts = discounts
+            .map(d => this.normalizeDiscountRow(d))
+            .filter(d => d && d.active);
         console.log(`📊 Found ${activeDiscounts.length} active discounts`);
         console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
         const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
@@ -1423,9 +1450,8 @@ class AttendanceVerificationService {
             console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
             let matchingDiscount = null;
             for (const discount of activeDiscounts) {
-                const discountNameRaw = this.getField(discount, ['name', 'Name']);
-                const discountName = String(discountNameRaw || '').trim();
-                const paymentKeyword = (this.getField(discount, ['payment_memo_keyword', 'Payment Memo Keyword', 'payment memo keyword']) || discountName).trim();
+                const discountName = discount.name?.trim() || '';
+                const paymentKeyword = discount.payment_memo_keyword?.trim() || discountName;
                 if (!paymentKeyword)
                     continue;
                 
@@ -1434,8 +1460,7 @@ class AttendanceVerificationService {
                 
                 // Check match based on match_type
                 let isMatch = false;
-                const matchTypeRaw = this.getField(discount, ['match_type', 'Match Type']);
-                const matchType = matchTypeRaw ? String(matchTypeRaw).toLowerCase() : 'exact';
+                const matchType = discount.match_type || 'exact';
                 
                 if (matchType === 'exact') {
                     isMatch = memoLower === keywordLower;
@@ -1520,43 +1545,37 @@ class AttendanceVerificationService {
         if (!discounts || discounts.length === 0 || !payments || payments.length === 0)
             return master;
         const invoiceToDiscount = new Map();
-        const activeDiscounts = discounts.filter((d) => {
-            if (!d)
-                return false;
-            const activeValue = this.getField(d, ['active', 'Active']);
-            if (activeValue === '')
-                return false;
-            const str = String(activeValue).trim().toLowerCase();
-            return str === 'true' || str === '1' || str === 'yes';
-        });
+        const activeDiscounts = discounts
+            .map(d => this.normalizeDiscountRow(d))
+            .filter(d => d && d.active);
         for (const p of payments) {
             const memo = String(p.Memo || '');
             const invoice = String(p.Invoice || '').trim();
             if (!invoice || !memo)
                 continue;
             for (const d of activeDiscounts) {
-                const code = String(d.discount_code || d.name || '').trim();
-                if (!code)
+                const keyword = String(d.payment_memo_keyword || d.discount_code || d.name || '').trim();
+                if (!keyword)
                     continue;
                 const matchType = String(d.match_type || 'contains').toLowerCase();
                 let matched = false;
                 if (matchType === 'exact') {
-                    matched = this.canonicalize(memo) === this.canonicalize(code);
+                    matched = this.canonicalize(memo) === this.canonicalize(keyword);
                 }
                 else if (matchType === 'regex') {
                     try {
-                        matched = new RegExp(code, 'i').test(memo);
+                        matched = new RegExp(keyword, 'i').test(memo);
                     }
                     catch { }
                 }
                 else {
-                    matched = this.canonicalize(memo).includes(this.canonicalize(code));
+                    matched = this.canonicalize(memo).includes(this.canonicalize(keyword));
                 }
                 if (matched) {
                     const pct = Number(d.applicable_percentage || 0) || 0;
                     const existing = invoiceToDiscount.get(invoice);
                     if (!existing || pct > existing.pct) {
-                        invoiceToDiscount.set(invoice, { name: String(d.name || code), pct });
+                        invoiceToDiscount.set(invoice, { name: String(d.name || keyword), pct });
                     }
                 }
             }
