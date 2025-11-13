@@ -142,19 +142,18 @@ class AttendanceVerificationService {
             // Link attendance to invoices (invoice-driven approach)
             const attendanceToInvoice = this.linkAttendanceToInvoices(validAttendance, paymentVerificationRows, payments);
             // Build master rows with invoice linkage
+            // All attendance records linked to invoices are verified (no "Pending Attendance" status)
             const masterRows = validAttendance.map(att => {
                 const key = this.generateUniqueKey(att);
                 const invoiceNumber = attendanceToInvoice.get(key) || '';
                 return this.buildSimpleMasterRowWithInvoice(att, invoiceNumber, paymentInfoByInvoice, payments, rules);
             });
-            // Update verification status based on session consumption
-            const updatedMasterRows = this.updateVerificationStatusBySessionConsumption(masterRows, paymentVerificationRows);
             if (!params.skipWrite) {
-                await this.saveMasterData(updatedMasterRows);
+                await this.saveMasterData(masterRows);
             }
-            const summary = this.calculateSummary(updatedMasterRows);
+            const summary = this.calculateSummary(masterRows);
             console.log(`✅ Invoice-driven verification complete: ${summary.totalRecords} records processed in ${Date.now() - startTime}ms`);
-            return { masterRows: updatedMasterRows, summary };
+            return { masterRows, summary };
         }
         catch (error) {
             console.error('❌ Invoice-driven verification failed:', error);
