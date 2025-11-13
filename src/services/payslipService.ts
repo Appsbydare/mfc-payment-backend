@@ -47,13 +47,80 @@ export interface PayslipGenerationParams {
 
 export class PayslipService {
   private readonly MASTER_SHEET = 'payment_calc_detail';
+  private readonly RULES_SHEET = 'rules';
+
+  private normalizeRules(rawRules: any[]): any[] {
+    if (!rawRules || rawRules.length === 0) return [];
+    const toNum = (v: any, d: number = 0): number => {
+      const n = parseFloat(String(v).replace('%', ''));
+      return isNaN(n) ? d : n;
+    };
+    return rawRules.map((r) => ({
+      id: String(r.id || r.ID || '').trim() || '',
+      rule_name: String(r.rule_name || r.name || r.rule || '').trim(),
+      package_name: String(r.package_name || r.membership_name || r.name || '').trim(),
+      session_type: (() => {
+        const raw = String((r.session_type ?? r.category ?? '')).trim().toLowerCase();
+        if (raw) {
+          if (/^priv/.test(raw)) return 'private';
+          if (/^group/.test(raw)) return 'group';
+        }
+        const privateFlag = String((r.privateSession ?? '')).toLowerCase();
+        if (privateFlag === 'true' || privateFlag === '1') return 'private';
+        return 'group';
+      })(),
+      attendance_alias: String(r.attendance_alias || r.attendanceAlias || '').trim(),
+      payment_memo_alias: String(r.payment_memo_alias || r.paymentMemoAlias || '').trim(),
+    }));
+  }
+
+  private findMatchingRule(membershipName: string, rules: any[]): any | null {
+    if (!rules || rules.length === 0 || !membershipName) return null;
+    const membershipLower = membershipName.toLowerCase().trim();
+    
+    // First try attendance_alias match
+    for (const rule of rules) {
+      const alias = String(rule.attendance_alias || '').trim().toLowerCase();
+      if (alias && alias === membershipLower) {
+        return rule;
+      }
+    }
+    
+    // Then try package_name or rule_name match
+    for (const rule of rules) {
+      const packageName = String(rule.package_name || rule.rule_name || '').trim().toLowerCase();
+      if (packageName && packageName === membershipLower) {
+        return rule;
+      }
+    }
+    
+    // Try partial match
+    for (const rule of rules) {
+      const packageName = String(rule.package_name || rule.rule_name || '').trim().toLowerCase();
+      if (packageName && membershipLower.includes(packageName)) {
+        return rule;
+      }
+      if (packageName && packageName.includes(membershipLower)) {
+        return rule;
+      }
+    }
+    
+    return null;
+  }
 
   async generatePayslip(params: PayslipGenerationParams): Promise<{ success: boolean; data?: PayslipData; error?: string }> {
     try {
       console.log(`📊 Generating payslip for coach: ${params.coachName}`);
 
-      // Read payment calculation details from Google Sheets
-      const paymentCalcData = await googleSheetsService.readSheet(this.MASTER_SHEET);
+      // Read payment calculation details and rules from Google Sheets
+      const [paymentCalcData, rawRules] = await Promise.all([
+        googleSheetsService.readSheet(this.MASTER_SHEET),
+        googleSheetsService.readSheet(this.RULES_SHEET)
+      ]);
+      
+      // Normalize rules
+      const rules = this.normalizeRules(rawRules);
+      console.log(`📋 Loaded ${rules.length} rules for categorization`);
 
       if (!paymentCalcData || paymentCalcData.length === 0) {
         return {
@@ -101,19 +168,33 @@ export class PayslipService {
         const sessionTypeFromSheet = String(row['Session Type'] || row['sessionType'] || '');
         const classTypeFromSheet = String(row['Class Type'] || row['ClassType'] || row['classType'] || '');
 
-        // Decide grouping: check Session Type, Class Type, and membership name for private indicators
-        let isPrivate = /private/i.test(sessionTypeFromSheet);
+        // Use rule's Category (session_type) to determine if private or group
+        const matchingRule = this.findMatchingRule(membershipName, rules);
+        let isPrivate = false;
         
-        // If Session Type doesn't indicate private, check Class Type
-        if (!isPrivate && classTypeFromSheet) {
-          const classTypeLower = classTypeFromSheet.toLowerCase();
-          isPrivate = /(private|1 to 1|1-to-1|one to one)/i.test(classTypeLower);
-        }
-        
-        // If still not private, check membership name
-        if (!isPrivate && membershipName) {
-          const m = String(membershipName || '').toLowerCase();
-          isPrivate = /(private|1 to 1|one to one)/i.test(m);
+        if (matchingRule) {
+          // Use rule's session_type (Category) - this is the source of truth
+          isPrivate = matchingRule.session_type === 'private';
+          console.log(`📋 Session "${membershipName}" matched to rule "${matchingRule.package_name || matchingRule.rule_name}" with Category: ${matchingRule.session_type}`);
+        } else {
+          // Fallback: check Session Type, Class Type, and membership name for private indicators
+          isPrivate = /private/i.test(sessionTypeFromSheet);
+          
+          // If Session Type doesn't indicate private, check Class Type
+          if (!isPrivate && classTypeFromSheet) {
+            const classTypeLower = classTypeFromSheet.toLowerCase();
+            isPrivate = /(private|1 to 1|1-to-1|one to one)/i.test(classTypeLower);
+          }
+          
+          // If still not private, check membership name
+          if (!isPrivate && membershipName) {
+            const m = String(membershipName || '').toLowerCase();
+            isPrivate = /(private|1 to 1|one to one)/i.test(m);
+          }
+          
+          if (!matchingRule) {
+            console.warn(`⚠️ No rule found for membership "${membershipName}", using fallback detection`);
+          }
         }
 
         const sessionData = {
