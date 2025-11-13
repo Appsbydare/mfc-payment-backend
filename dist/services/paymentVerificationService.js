@@ -61,6 +61,16 @@ class PaymentVerificationService {
         }
         return this.rulesCache;
     }
+    countAttendanceRecordsForInvoice(invoiceNumber, masterData) {
+        if (!invoiceNumber || !masterData || !Array.isArray(masterData)) {
+            return 0;
+        }
+        const invoiceStr = String(invoiceNumber).trim();
+        return masterData.filter(row => {
+            const rowInvoice = String(row['Invoice #'] || row.invoiceNumber || '').trim();
+            return rowInvoice === invoiceStr;
+        }).length;
+    }
     findRuleForPackage(packageName, rules) {
         if (!packageName)
             return null;
@@ -186,6 +196,12 @@ class PaymentVerificationService {
                 const tableRow = await this.buildRowFromPayments(invoice === '__NO_INVOICE__' ? '' : invoice, rows, rules);
                 if (tableRow) {
                     tableRow.attendanceVerified = tableRow.invoice ? verifiedInvoices.has(tableRow.invoice) : false;
+                    // Count consumed sessions and calculate pending sessions
+                    const consumedSessions = this.countAttendanceRecordsForInvoice(tableRow.invoice, masterData);
+                    const expectedSessions = tableRow.numberOfSessions || 0;
+                    const pendingSessions = Math.max(0, expectedSessions - consumedSessions);
+                    tableRow.consumedSessions = consumedSessions;
+                    tableRow.pendingSessions = pendingSessions;
                     result.push(tableRow);
                 }
             }

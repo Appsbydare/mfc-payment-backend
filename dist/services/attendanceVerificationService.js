@@ -35,12 +35,14 @@ class AttendanceVerificationService {
             });
             console.log(`📊 Filtered out ${filteredAttendance.length - validAttendance.length} records with status 'Late Cancelled' or 'Registered'`);
             const masterRows = validAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice, rules));
+            // Update verification status based on session consumption
+            const updatedMasterRows = this.updateVerificationStatusBySessionConsumption(masterRows, paymentVerificationRows);
             if (!params.skipWrite) {
-                await this.saveMasterData(masterRows);
+                await this.saveMasterData(updatedMasterRows);
             }
-            const summary = this.calculateSummary(masterRows);
+            const summary = this.calculateSummary(updatedMasterRows);
             console.log(`✅ Simplified verification complete: ${summary.totalRecords} records processed in ${Date.now() - startTime}ms`);
-            return { masterRows, summary };
+            return { masterRows: updatedMasterRows, summary };
         }
         catch (error) {
             console.error('❌ Simplified verification failed:', error);
@@ -1468,6 +1470,42 @@ class AttendanceVerificationService {
             }
             return true;
         });
+    }
+    updateVerificationStatusBySessionConsumption(masterRows, paymentVerificationRows) {
+        console.log('🔄 Updating verification status based on session consumption...');
+        // Create map of invoice -> expected sessions from payment verification
+        const invoiceToExpectedSessions = new Map();
+        paymentVerificationRows.forEach(row => {
+            const invoice = String(row.invoice || '').trim();
+            if (invoice) {
+                const expectedSessions = Number(row.numberOfSessions || 0);
+                invoiceToExpectedSessions.set(invoice, expectedSessions);
+            }
+        });
+        // Count consumed sessions per invoice
+        const invoiceToConsumedSessions = new Map();
+        masterRows.forEach(row => {
+            const invoice = String(row.invoiceNumber || '').trim();
+            if (invoice) {
+                const current = invoiceToConsumedSessions.get(invoice) || 0;
+                invoiceToConsumedSessions.set(invoice, current + 1);
+            }
+        });
+        // Update verification status
+        let pendingCount = 0;
+        masterRows.forEach(row => {
+            const invoice = String(row.invoiceNumber || '').trim();
+            if (invoice && row.verificationStatus === 'Verified') {
+                const expected = invoiceToExpectedSessions.get(invoice) || 0;
+                const consumed = invoiceToConsumedSessions.get(invoice) || 0;
+                if (expected > 0 && consumed < expected) {
+                    row.verificationStatus = 'Pending Attendance';
+                    pendingCount++;
+                }
+            }
+        });
+        console.log(`📊 Updated ${pendingCount} records to 'Pending Attendance' status`);
+        return masterRows;
     }
     round2(n) {
         return Math.round((n || 0) * 100) / 100;
