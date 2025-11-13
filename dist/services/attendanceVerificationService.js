@@ -27,7 +27,14 @@ class AttendanceVerificationService {
                 paymentInfoByInvoice.set(invoice, row);
             });
             const filteredAttendance = this.filterAttendanceByDate(attendance, params.fromDate, params.toDate);
-            const masterRows = filteredAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice, rules));
+            // Filter out records with status 'Late Cancelled' or 'Registered' at the beginning of verification
+            const validAttendance = filteredAttendance.filter(att => {
+                const status = this.getField(att, ['Status']) || '';
+                const statusLower = String(status).trim().toLowerCase();
+                return statusLower !== 'late cancelled' && statusLower !== 'registered';
+            });
+            console.log(`📊 Filtered out ${filteredAttendance.length - validAttendance.length} records with status 'Late Cancelled' or 'Registered'`);
+            const masterRows = validAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice, rules));
             if (!params.skipWrite) {
                 await this.saveMasterData(masterRows);
             }
