@@ -146,9 +146,14 @@ class PaymentVerificationService {
         const netPriceRaw = paymentsTotal - taxAmount - discountAmountRaw;
         const netPrice = netPriceRaw < 0 ? 0 : round2(netPriceRaw);
         const rule = this.findRuleForPackage(basePayment.Memo || '', rules);
-        const sessions = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0
+        const sessionsRaw = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0
             ? Number(rule.sessions_per_pack || rule.sessions || 0)
             : 0;
+        // Ensure sessions is always an integer (round down to prevent over-linking)
+        const sessions = Math.floor(sessionsRaw);
+        if (sessionsRaw !== sessions && sessionsRaw > 0) {
+            console.warn(`⚠️ Invoice ${invoiceNumber}: sessions_per_pack was ${sessionsRaw}, rounded down to ${sessions}`);
+        }
         const discountedSessionPrice = sessions > 0 ? round2(Math.max(netPrice, 0) / sessions) : 0;
         return {
             invoice: String(invoiceNumber || '').trim(),

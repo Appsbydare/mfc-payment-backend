@@ -62,10 +62,18 @@ class AttendanceVerificationService {
             const invoice = String(invoiceRow.invoice || '').trim();
             const customer = String(invoiceRow.customer || '').trim();
             const normalizedCustomer = this.normalizeCustomerName(customer);
-            const numberOfSessions = Number(invoiceRow.numberOfSessions || 0);
+            // Ensure numberOfSessions is an integer (round down to prevent over-linking)
+            const numberOfSessionsRaw = Number(invoiceRow.numberOfSessions || 0);
+            const numberOfSessions = Math.floor(numberOfSessionsRaw);
             const invoiceDate = this.parseDate(invoiceRow.date || '') || new Date(0);
             if (!normalizedCustomer || numberOfSessions <= 0) {
+                if (numberOfSessionsRaw > 0 && numberOfSessionsRaw !== numberOfSessions) {
+                    console.warn(`⚠️ Invoice ${invoice}: numberOfSessions was ${numberOfSessionsRaw}, rounded down to ${numberOfSessions}`);
+                }
                 continue;
+            }
+            if (numberOfSessionsRaw !== numberOfSessions) {
+                console.warn(`⚠️ Invoice ${invoice}: numberOfSessions was ${numberOfSessionsRaw}, rounded down to ${numberOfSessions} to prevent over-linking`);
             }
             const customerAttendance = attendanceByCustomer.get(normalizedCustomer) || [];
             // Filter out already linked attendance records
@@ -89,9 +97,10 @@ class AttendanceVerificationService {
                 // Then by distance
                 return a.distance - b.distance;
             });
-            // Link up to numberOfSessions attendance records
+            // Link up to numberOfSessions attendance records (strictly enforce integer limit)
             let linkedCount = 0;
             for (const { att } of attendanceWithDistance) {
+                // Strict check: only link if we haven't reached the exact limit
                 if (linkedCount >= numberOfSessions) {
                     break;
                 }
@@ -100,7 +109,11 @@ class AttendanceVerificationService {
                 linkedAttendanceKeys.add(key);
                 linkedCount++;
             }
-            console.log(`📋 Invoice ${invoice} (${customer}): Linked ${linkedCount}/${numberOfSessions} sessions`);
+            if (linkedCount > numberOfSessions) {
+                console.error(`❌ Invoice ${invoice} (${customer}): ERROR - Linked ${linkedCount} sessions but expected only ${numberOfSessions}!`);
+            } else {
+                console.log(`📋 Invoice ${invoice} (${customer}): Linked ${linkedCount}/${numberOfSessions} sessions`);
+            }
         }
         console.log(`✅ Linked ${linkedAttendanceKeys.size} attendance records to invoices`);
         return attendanceToInvoice;
