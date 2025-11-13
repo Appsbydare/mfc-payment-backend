@@ -66,11 +66,16 @@ class AttendanceVerificationService {
             const numberOfSessionsRaw = Number(invoiceRow.numberOfSessions || 0);
             const numberOfSessions = Math.floor(numberOfSessionsRaw);
             const invoiceDate = this.parseDate(invoiceRow.date || '') || new Date(0);
-            if (!normalizedCustomer || numberOfSessions <= 0) {
+            if (!normalizedCustomer) {
+                continue;
+            }
+            // Handle invoices with 0 sessions: still try to link if there's exact date match
+            const isZeroSessions = numberOfSessions <= 0;
+            if (isZeroSessions) {
                 if (numberOfSessionsRaw > 0 && numberOfSessionsRaw !== numberOfSessions) {
                     console.warn(`⚠️ Invoice ${invoice}: numberOfSessions was ${numberOfSessionsRaw}, rounded down to ${numberOfSessions}`);
                 }
-                continue;
+                console.log(`📋 Invoice ${invoice} (${customer}): numberOfSessions is 0, will try to link exact date matches only`);
             }
             if (numberOfSessionsRaw !== numberOfSessions) {
                 console.warn(`⚠️ Invoice ${invoice}: numberOfSessions was ${numberOfSessionsRaw}, rounded down to ${numberOfSessions} to prevent over-linking`);
@@ -85,10 +90,27 @@ class AttendanceVerificationService {
             const attendanceWithDistance = availableAttendance.map(att => {
                 const attDate = this.parseDate(this.getField(att, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '') || new Date(0);
                 const distance = Math.abs(attDate.getTime() - invoiceDate.getTime());
-                return { att, distance, date: attDate };
+                // Check if dates match exactly (same day)
+                const isExactMatch = attDate.getFullYear() === invoiceDate.getFullYear() &&
+                    attDate.getMonth() === invoiceDate.getMonth() &&
+                    attDate.getDate() === invoiceDate.getDate();
+                return { att, distance, date: attDate, isExactMatch };
             });
             attendanceWithDistance.sort((a, b) => {
-                // Prefer attendance on or before invoice date
+                // For zero-session invoices, prioritize exact date matches
+                if (isZeroSessions) {
+                    if (a.isExactMatch !== b.isExactMatch) {
+                        return b.isExactMatch ? -1 : 1; // Exact matches first
+                    }
+                    // If both are exact matches or both are not, prefer attendance on or before invoice date
+                    const aBefore = a.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
+                    const bBefore = b.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
+                    if (aBefore !== bBefore) {
+                        return aBefore - bBefore;
+                    }
+                    return a.distance - b.distance;
+                }
+                // For normal invoices, prefer attendance on or before invoice date
                 const aBefore = a.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
                 const bBefore = b.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
                 if (aBefore !== bBefore) {
@@ -97,22 +119,32 @@ class AttendanceVerificationService {
                 // Then by distance
                 return a.distance - b.distance;
             });
-            // Link up to numberOfSessions attendance records (strictly enforce integer limit)
+            // Link up to numberOfSessions attendance records
+            // For zero-session invoices, only link exact date matches (max 1)
             let linkedCount = 0;
-            for (const { att } of attendanceWithDistance) {
+            const maxToLink = isZeroSessions ? 1 : numberOfSessions;
+            for (const { att, isExactMatch } of attendanceWithDistance) {
                 // Strict check: only link if we haven't reached the exact limit
-                if (linkedCount >= numberOfSessions) {
+                if (linkedCount >= maxToLink) {
                     break;
+                }
+                // For zero-session invoices, only link if date matches exactly
+                if (isZeroSessions && !isExactMatch) {
+                    continue;
                 }
                 const key = this.generateUniqueKey(att);
                 attendanceToInvoice.set(key, invoice);
                 linkedAttendanceKeys.add(key);
                 linkedCount++;
             }
-            if (linkedCount > numberOfSessions) {
-                console.error(`❌ Invoice ${invoice} (${customer}): ERROR - Linked ${linkedCount} sessions but expected only ${numberOfSessions}!`);
+            if (linkedCount > maxToLink) {
+                console.error(`❌ Invoice ${invoice} (${customer}): ERROR - Linked ${linkedCount} sessions but expected only ${maxToLink}!`);
             } else {
-                console.log(`📋 Invoice ${invoice} (${customer}): Linked ${linkedCount}/${numberOfSessions} sessions`);
+                if (isZeroSessions) {
+                    console.log(`📋 Invoice ${invoice} (${customer}): Linked ${linkedCount} session(s) (zero-session invoice, exact date match only)`);
+                } else {
+                    console.log(`📋 Invoice ${invoice} (${customer}): Linked ${linkedCount}/${numberOfSessions} sessions`);
+                }
             }
         }
         console.log(`✅ Linked ${linkedAttendanceKeys.size} attendance records to invoices`);
