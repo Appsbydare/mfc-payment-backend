@@ -98,6 +98,15 @@ export class PayslipService {
         const manualSessionPrice = parseFloat(row['Manual Session Price'] || row['manualSessionPrice'] || 0) || 0;
         const invoiceVerifiedSessionPrice = parseFloat(row['Invoice Verified Session Price'] || row['invoiceVerifiedSessionPrice'] || 0) || 0;
         const coachAmount = parseFloat(row['Coach Amount'] || row['coachAmount'] || 0) || 0;
+        const sessionTypeFromSheet = String(row['Session Type'] || row['sessionType'] || '');
+        const classTypeFromSheet = String(row['Class Type'] || row['ClassType'] || row['classType'] || '');
+
+        // Decide grouping: prefer explicit Session Type, fallback to membership name keywords
+        let isPrivate = /private/i.test(sessionTypeFromSheet);
+        if (!sessionTypeFromSheet) {
+          const m = String(membershipName || '').toLowerCase();
+          isPrivate = /(private|1 to 1|one to one)/i.test(m);
+        }
 
         const sessionData = {
           clientName: customerName,
@@ -110,16 +119,17 @@ export class PayslipService {
           yourPay: coachAmount
         };
 
-        // Determine if it's a private or group session based on membership name
-        if (this.isPrivateSession(membershipName)) {
+        if (isPrivate) {
+          // For private, display the package/membership name instead of raw 'private'
+          const displayType = membershipName || sessionTypeFromSheet || 'Private Session';
           privateSessions.push({
             ...sessionData,
-            sessionType: this.getSessionType(membershipName)
+            sessionType: displayType
           });
         } else {
           groupSessions.push({
             ...sessionData,
-            classType: this.getClassType(membershipName),
+            classType: classTypeFromSheet || this.getClassType(membershipName),
             membershipUsed: membershipName
           });
         }
