@@ -690,6 +690,8 @@ router.delete('/invoices', async (req, res) => {
 router.get('/payment-verification', async (req, res) => {
     try {
         const rows = await paymentVerificationService_1.paymentVerificationService.getPaymentVerificationTable();
+        const attendanceVerifiedCount = rows.filter(row => row.attendanceVerified).length;
+        const attendanceUnverifiedPercent = rows.length > 0 ? ((rows.length - attendanceVerifiedCount) / rows.length) * 100 : 0;
         res.json({
             success: true,
             data: rows,
@@ -698,7 +700,9 @@ router.get('/payment-verification', async (req, res) => {
                 totalFinalPrice: rows.reduce((sum, row) => sum + (row.finalPrice || 0), 0),
                 totalTax: rows.reduce((sum, row) => sum + (row.tax || 0), 0),
                 totalNetPrice: rows.reduce((sum, row) => sum + (row.netPrice || 0), 0),
-                invoicesWithDiscounts: rows.filter(row => row.discount).length
+                invoicesWithDiscounts: rows.filter(row => row.discount).length,
+                attendanceVerifiedCount,
+                attendanceUnverifiedPercent
             }
         });
     }

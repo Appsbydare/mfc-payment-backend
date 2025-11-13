@@ -4,6 +4,7 @@ exports.paymentVerificationService = exports.PaymentVerificationService = void 0
 const googleSheets_1 = require("./googleSheets");
 const ruleService_1 = require("./ruleService");
 const discountService_1 = require("./discountService");
+const MASTER_SHEET = 'payment_calc_detail';
 const PAYMENT_SHEET = 'Payments';
 const round2 = (value) => {
     const num = Number.parseFloat(String(value));
@@ -149,6 +150,7 @@ class PaymentVerificationService {
             discountAmount,
             tax: round2(taxAmount),
             discountPercentage: round2(discountPercentage),
+            finalPrice: effectiveFinal < 0 ? 0 : effectiveFinal,
             netPrice,
             numberOfSessions: sessions,
             discountedSessionPrice,
@@ -156,13 +158,21 @@ class PaymentVerificationService {
     }
     async getPaymentVerificationTable() {
         try {
-            const [payments, rules] = await Promise.all([
+            const [payments, rules, masterData] = await Promise.all([
                 googleSheets_1.googleSheetsService.readSheet(PAYMENT_SHEET),
                 this.getRules(),
+                googleSheets_1.googleSheetsService.readSheet(MASTER_SHEET).catch(() => [])
             ]);
             if (!Array.isArray(payments) || payments.length === 0) {
                 return [];
             }
+            const verifiedInvoices = new Set((masterData || [])
+                .filter(row => {
+                const status = String(row['Verification Status'] || row.verificationStatus || '').toLowerCase().trim();
+                return status === 'verified';
+            })
+                .map(row => String(row['Invoice #'] || row.invoiceNumber || '').trim())
+                .filter(Boolean));
             const byInvoice = new Map();
             payments.forEach((row) => {
                 const invoice = String(row?.Invoice || '').trim() || '__NO_INVOICE__';
@@ -175,6 +185,7 @@ class PaymentVerificationService {
             for (const [invoice, rows] of Array.from(byInvoice.entries())) {
                 const tableRow = await this.buildRowFromPayments(invoice === '__NO_INVOICE__' ? '' : invoice, rows, rules);
                 if (tableRow) {
+                    tableRow.attendanceVerified = tableRow.invoice ? verifiedInvoices.has(tableRow.invoice) : false;
                     result.push(tableRow);
                 }
             }

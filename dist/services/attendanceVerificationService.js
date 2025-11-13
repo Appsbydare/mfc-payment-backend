@@ -16,7 +16,7 @@ class AttendanceVerificationService {
         const startTime = Date.now();
         try {
             console.log('🔄 Starting simplified verification using payment verification data');
-            const { attendance, payments } = await this.loadAllData();
+            const { attendance, payments, rules } = await this.loadAllData();
             const paymentVerificationRows = await paymentVerificationService_1.paymentVerificationService.getPaymentVerificationTable();
             const paymentsByCustomer = this.groupPaymentsByCustomer(payments);
             const paymentInfoByInvoice = new Map();
@@ -27,7 +27,7 @@ class AttendanceVerificationService {
                 paymentInfoByInvoice.set(invoice, row);
             });
             const filteredAttendance = this.filterAttendanceByDate(attendance, params.fromDate, params.toDate);
-            const masterRows = filteredAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice));
+            const masterRows = filteredAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice, rules));
             if (!params.skipWrite) {
                 await this.saveMasterData(masterRows);
             }
@@ -39,64 +39,6 @@ class AttendanceVerificationService {
             console.error('❌ Simplified verification failed:', error);
             throw error;
         }
-    }
-    async processAttendanceRecordV2(attendance, payments, rules, discounts) {
-        const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
-        const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
-        const membershipName = this.getField(attendance, ['Membership Name', 'Membership', 'MembershipName']) || '';
-        const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
-        const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
-        const status = this.getField(attendance, ['Status']) || '';
-        const sessionType = this.classifySessionType(attendance['Offering Type Name'] || '');
-        const rule = this.findMatchingRuleExact(membershipName, sessionType, rules);
-        const sessionsPerPack = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0 ? Number(rule.sessions_per_pack || rule.sessions || 0) : 1;
-        const payment = this.findMatchingPayment(attendance, payments, rules) || this.findMatchingPaymentDirect(customerName, membershipName, payments, rules);
-        let verificationStatus = 'Unpaid';
-        let invoiceNumber = '';
-        let amount = 0;
-        let paymentDate = '';
-        let sessionPrice = 0;
-        let discountedSessionPrice = 0;
-        let amounts = { coach: 0, bgm: 0, management: 0, mfc: 0 };
-        if (payment) {
-            invoiceNumber = String(payment.Invoice || '').trim();
-            amount = Number(payment.Amount || 0);
-            paymentDate = payment.Date || '';
-            verificationStatus = 'Paid';
-            // V2 verification: session price based purely on paid amount and package sessions
-            sessionPrice = sessionsPerPack > 0 ? this.round2(amount / sessionsPerPack) : this.round2(amount);
-            discountedSessionPrice = sessionPrice;
-            if (rule) {
-                amounts = this.calculateAmounts(discountedSessionPrice, rule, sessionType);
-            }
-        }
-        const uniqueKey = this.generateUniqueKey(attendance);
-        return {
-            customerName,
-            eventStartsAt,
-            membershipName,
-            classType,
-            sessionType: (rule && rule.session_type) ? String(rule.session_type).toLowerCase() : sessionType,
-            instructors,
-            status,
-            discount: '',
-            discountPercentage: 0,
-            verificationStatus,
-            invoiceNumber,
-            amount,
-            paymentDate,
-            packagePrice: rule ? this.round2(Number(rule.price || 0)) : 0,
-            numberOfSessions: sessionsPerPack,
-            sessionPrice,
-            discountedSessionPrice,
-            coachAmount: this.round2(amounts.coach),
-            bgmAmount: this.round2(amounts.bgm),
-            managementAmount: this.round2(amounts.management),
-            mfcAmount: this.round2(amounts.mfc),
-            uniqueKey,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
     }
     async verifyAttendanceData(params = {}) {
         const startTime = Date.now();
@@ -467,11 +409,11 @@ class AttendanceVerificationService {
         }
         return selectedPayment;
     }
-    buildSimpleMasterRow(attendance, paymentsByCustomer, paymentInfoByInvoice) {
+    buildSimpleMasterRow(attendance, paymentsByCustomer, paymentInfoByInvoice, rules) {
         const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
         const normalizedCustomer = this.normalizeCustomerName(customerName);
         const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
-        const attendanceDate = this.parseDate(eventStartsAt);
+        const attendanceDate = this.parseDate(eventStartsAt) || new Date(0);
         const membershipName = this.getField(attendance, ['Membership Name', 'Membership', 'MembershipName']) || '';
         const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
         const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
@@ -488,6 +430,7 @@ class AttendanceVerificationService {
         let discountMemo = '';
         let discountPercentage = 0;
         let numberOfSessions = 0;
+        let taxAmount = 0;
         if (matchedPayment) {
             invoiceNumber = String(matchedPayment.Invoice || matchedPayment.invoice || '').trim();
             paymentDate = matchedPayment.Date || matchedPayment.date || '';
@@ -505,6 +448,9 @@ class AttendanceVerificationService {
                 if (invoiceInfo.discountAmount !== undefined) {
                     invoiceDiscountAmount = this.round2(Number(invoiceInfo.discountAmount || 0));
                 }
+                if (invoiceInfo.tax !== undefined) {
+                    taxAmount = this.round2(Number(invoiceInfo.tax || 0));
+                }
                 if (invoiceInfo.numberOfSessions !== undefined) {
                     numberOfSessions = Number(invoiceInfo.numberOfSessions || 0);
                 }
@@ -516,6 +462,9 @@ class AttendanceVerificationService {
                 }
             }
         }
+        if (taxAmount <= 0 && invoiceAmount > 0 && invoiceNetAmount > 0 && invoiceAmount >= invoiceNetAmount) {
+            taxAmount = this.round2(invoiceAmount - invoiceNetAmount - invoiceDiscountAmount);
+        }
         if (invoiceNetAmount <= 0) {
             invoiceNetAmount = invoiceAmount;
         }
@@ -525,6 +474,24 @@ class AttendanceVerificationService {
         const sessionPrice = this.round2(numberOfSessions > 0 ? invoiceNetAmount / numberOfSessions : invoiceNetAmount);
         const discountedSessionPrice = sessionPrice;
         const amount = sessionPrice;
+        let coachAmount = 0;
+        let managementAmount = 0;
+        let mfcAmount = 0;
+        const rule = this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
+        if (rule) {
+            const coachPct = Number(rule.coach_percentage || 0);
+            const managementPct = Number(rule.management_percentage || 0);
+            const mfcPct = Number(rule.mfc_percentage || 0);
+            if (coachPct) {
+                coachAmount = this.round2(discountedSessionPrice * (coachPct / 100));
+            }
+            if (managementPct) {
+                managementAmount = this.round2(discountedSessionPrice * (managementPct / 100));
+            }
+            if (mfcPct) {
+                mfcAmount = this.round2(discountedSessionPrice * (mfcPct / 100));
+            }
+        }
         const uniqueKey = this.generateUniqueKey(attendance);
         return {
             customerName,
@@ -541,19 +508,17 @@ class AttendanceVerificationService {
             invoiceNumber,
             amount,
             paymentDate,
+            tax: this.round2(taxAmount),
             invoiceAmount: this.round2(invoiceAmount),
             invoiceNetAmount: this.round2(invoiceNetAmount),
             invoiceDiscountedAmount: this.round2(invoiceNetAmount),
             invoiceVerifiedSessionPrice: sessionPrice,
             manualSessionPrice: 0,
-            packagePrice: 0,
             numberOfSessions,
-            sessionPrice,
             discountedSessionPrice,
-            coachAmount: 0,
-            bgmAmount: 0,
-            managementAmount: 0,
-            mfcAmount: 0,
+            coachAmount,
+            managementAmount,
+            mfcAmount,
             uniqueKey,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
@@ -1297,13 +1262,9 @@ class AttendanceVerificationService {
         return baseKey.replace(/[^a-zA-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
     }
     normalizeMasterRow(row) {
-        const sessionPrice = parseFloat(row.sessionPrice || row['Session Price'] || '0');
         const discountPercentage = parseFloat(row.discountPercentage || row['Discount %'] || '0');
         let discountedSessionPrice = parseFloat(row.discountedSessionPrice || row['Discounted Session Price'] || '0');
-        if (discountedSessionPrice === 0 && sessionPrice > 0) {
-            const factor = 1 - (discountPercentage / 100);
-            discountedSessionPrice = this.round2(sessionPrice * factor);
-        }
+        const tax = parseFloat(row.tax || row['Tax'] || '0');
         return {
             customerName: row.customerName || row['Customer Name'] || '',
             eventStartsAt: row.eventStartsAt || row['Event Starts At'] || '',
@@ -1318,12 +1279,10 @@ class AttendanceVerificationService {
             invoiceNumber: row.invoiceNumber || row['Invoice #'] || '',
             amount: parseFloat(row.amount || row['Amount'] || '0'),
             paymentDate: row.paymentDate || row['Payment Date'] || '',
-            packagePrice: parseFloat(row.packagePrice || row['Package Price'] || '0'),
+            tax,
             numberOfSessions: parseFloat(row.numberOfSessions || row['Number of Sessions'] || '0'),
-            sessionPrice,
             discountedSessionPrice,
             coachAmount: parseFloat(row.coachAmount || row['Coach Amount'] || '0'),
-            bgmAmount: parseFloat(row.bgmAmount || row['BGM Amount'] || '0'),
             managementAmount: parseFloat(row.managementAmount || row['Management Amount'] || '0'),
             mfcAmount: parseFloat(row.mfcAmount || row['MFC Amount'] || '0'),
             uniqueKey: row.uniqueKey || row['UniqueKey'] || this.generateUniqueKey({
@@ -1404,17 +1363,15 @@ class AttendanceVerificationService {
             'Invoice #': row.invoiceNumber,
             'Amount': row.amount,
             'Payment Date': row.paymentDate,
+            'Tax': row.tax,
             'Invoice Amount': row.invoiceAmount,
             'Invoice Net Amount': row.invoiceNetAmount,
             'Invoice Discounted Amount': row.invoiceDiscountedAmount,
             'Invoice Verified Session Price': row.invoiceVerifiedSessionPrice,
             'Manual Session Price': row.manualSessionPrice,
-            'Package Price': row.packagePrice,
             'Number of Sessions': row.numberOfSessions,
-            'Session Price': row.sessionPrice,
             'Discounted Session Price': row.discountedSessionPrice,
             'Coach Amount': row.coachAmount,
-            'BGM Amount': row.bgmAmount,
             'Management Amount': row.managementAmount,
             'MFC Amount': row.mfcAmount,
             'UniqueKey': row.uniqueKey,
