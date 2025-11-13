@@ -1284,6 +1284,7 @@ class AttendanceVerificationService {
             discountPercentage,
             verificationStatus: row.verificationStatus || row['Verification Status'] || 'Not Verified',
             invoiceNumber: row.invoiceNumber || row['Invoice #'] || '',
+            invoiceAmount: parseFloat(row.invoiceAmount || row['Invoice Amount'] || '0'),
             amount: parseFloat(row.amount || row['Amount'] || '0'),
             paymentDate: row.paymentDate || row['Payment Date'] || '',
             tax,

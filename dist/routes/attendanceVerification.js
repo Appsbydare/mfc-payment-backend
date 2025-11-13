@@ -368,7 +368,7 @@ router.get('/export', async (req, res) => {
         if (format === 'csv') {
             const headers = [
                 'Customer Name', 'Event Starts At', 'Membership Name', 'Class Type', 'Session Type', 'Instructors', 'Status',
-                'Discount', 'Discount %', 'Verification Status', 'Invoice #', 'Amount',
+                'Discount', 'Discount %', 'Verification Status', 'Invoice #', 'Invoiced Amount', 'Amount',
                 'Payment Date', 'Session Price', 'Coach Amount', 'BGM Amount', 'Management Amount', 'MFC Amount'
             ];
             const csvContent = [
@@ -385,6 +385,7 @@ router.get('/export', async (req, res) => {
                     row.discountPercentage,
                     `"${row.verificationStatus}"`,
                     `"${row.invoiceNumber}"`,
+                    (row.invoiceAmount || 0),
                     row.amount,
                     `"${row.paymentDate}"`,
                     row.sessionPrice,
