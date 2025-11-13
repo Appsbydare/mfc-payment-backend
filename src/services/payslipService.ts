@@ -101,9 +101,17 @@ export class PayslipService {
         const sessionTypeFromSheet = String(row['Session Type'] || row['sessionType'] || '');
         const classTypeFromSheet = String(row['Class Type'] || row['ClassType'] || row['classType'] || '');
 
-        // Decide grouping: prefer explicit Session Type, fallback to membership name keywords
+        // Decide grouping: check Session Type, Class Type, and membership name for private indicators
         let isPrivate = /private/i.test(sessionTypeFromSheet);
-        if (!sessionTypeFromSheet) {
+        
+        // If Session Type doesn't indicate private, check Class Type
+        if (!isPrivate && classTypeFromSheet) {
+          const classTypeLower = classTypeFromSheet.toLowerCase();
+          isPrivate = /(private|1 to 1|1-to-1|one to one)/i.test(classTypeLower);
+        }
+        
+        // If still not private, check membership name
+        if (!isPrivate && membershipName) {
           const m = String(membershipName || '').toLowerCase();
           isPrivate = /(private|1 to 1|one to one)/i.test(m);
         }
@@ -120,8 +128,11 @@ export class PayslipService {
         };
 
         if (isPrivate) {
-          // For private, display the package/membership name instead of raw 'private'
-          const displayType = membershipName || sessionTypeFromSheet || 'Private Session';
+          // For private, prefer Class Type if it contains private session info, otherwise use membership name
+          let displayType = classTypeFromSheet;
+          if (!displayType || !/(private|1 to 1|1-to-1)/i.test(displayType)) {
+            displayType = membershipName || sessionTypeFromSheet || 'Private Session';
+          }
           privateSessions.push({
             ...sessionData,
             sessionType: displayType
