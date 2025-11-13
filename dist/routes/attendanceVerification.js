@@ -732,6 +732,7 @@ router.get('/payment-verification', async (req, res) => {
                 totalInvoices: rows.length,
                 totalFinalPrice: rows.reduce((sum, row) => sum + (row.finalPrice || 0), 0),
                 totalTax: rows.reduce((sum, row) => sum + (row.tax || 0), 0),
+                totalNetPrice: rows.reduce((sum, row) => sum + (row.netPrice || 0), 0),
                 invoicesWithDiscounts: rows.filter(row => row.discount).length
             }
         });

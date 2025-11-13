@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.paymentVerificationService = exports.PaymentVerificationService = void 0;
 const googleSheets_1 = require("./googleSheets");
 const ruleService_1 = require("./ruleService");
+const discountService_1 = require("./discountService");
 const PAYMENT_SHEET = 'Payments';
 const round2 = (value) => {
     const num = Number.parseFloat(String(value));
@@ -88,7 +89,7 @@ class PaymentVerificationService {
         }
         return bestMatch;
     }
-    buildRowFromPayments(invoiceNumber, rows, rules) {
+    async buildRowFromPayments(invoiceNumber, rows, rules) {
         if (!Array.isArray(rows) || rows.length === 0) {
             return null;
         }
@@ -102,24 +103,54 @@ class PaymentVerificationService {
             .reduce((sum, row) => sum + parseAmount(row.Amount), 0);
         const discountRows = rows.filter(isDiscountRow);
         const taxRows = rows.filter(isFeeRow);
-        const discountAmount = discountRows.reduce((sum, row) => sum + Math.abs(parseAmount(row.Amount)), 0);
+        const discountAmountRaw = discountRows.reduce((sum, row) => sum + Math.abs(parseAmount(row.Amount)), 0);
         const taxAmount = taxRows.reduce((sum, row) => sum + parseAmount(row.Amount), 0);
-        const effectiveFinal = round2(paymentsTotal - discountAmount);
+        let discountPercentage = 0;
+        let discountEffectiveAmount = paymentsTotal - discountAmountRaw;
+        try {
+            const discountInfo = await discountService_1.discountService.extractDiscountDataFromPayments(rows);
+            const discountEntry = Array.isArray(discountInfo)
+                ? discountInfo.find((d) => String(d?.invoice_number || '').trim() === invoiceNumber) || discountInfo[0]
+                : null;
+            if (discountEntry) {
+                if (typeof discountEntry.discount_percentage === 'number') {
+                    discountPercentage = Number(discountEntry.discount_percentage) || 0;
+                }
+                if (typeof discountEntry.discount_amount === 'number') {
+                    const effective = Number(discountEntry.effective_amount);
+                    if (Number.isFinite(effective)) {
+                        discountEffectiveAmount = effective;
+                    }
+                }
+            }
+        }
+        catch (error) {
+            console.warn(`⚠️ Failed to extract discount metadata for invoice ${invoiceNumber}:`, error?.message || error);
+        }
+        if (discountPercentage === 0 && paymentsTotal > 0 && discountAmountRaw > 0) {
+            discountPercentage = (discountAmountRaw / paymentsTotal) * 100;
+        }
+        const discountAmount = round2(discountAmountRaw);
+        const effectiveFinal = round2(discountEffectiveAmount);
+        const netPriceRaw = effectiveFinal - taxAmount;
+        const netPrice = netPriceRaw < 0 ? 0 : round2(netPriceRaw);
         const rule = this.findRuleForPackage(basePayment.Memo || '', rules);
         const sessions = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0
             ? Number(rule.sessions_per_pack || rule.sessions || 0)
             : 0;
-        const discountedSessionPrice = sessions > 0 ? round2(effectiveFinal / sessions) : 0;
+        const discountedSessionPrice = sessions > 0 ? round2(Math.max(netPrice, 0) / sessions) : 0;
         return {
             invoice: String(invoiceNumber || '').trim(),
             date: basePayment.Date || '',
-            amount: round2(parseAmount(basePayment.Amount)),
+            amount: round2(paymentsTotal),
             customer: basePayment.Customer || '',
             package: basePayment.Memo || '',
             discount: discountRows.length > 0 ? (discountRows[0]?.Memo || '') : '',
-            discountAmount: round2(discountAmount),
+            discountAmount,
             tax: round2(taxAmount),
+            discountPercentage: round2(discountPercentage),
             finalPrice: effectiveFinal < 0 ? 0 : effectiveFinal,
+            netPrice,
             numberOfSessions: sessions,
             discountedSessionPrice,
         };
@@ -143,7 +174,7 @@ class PaymentVerificationService {
             });
             const result = [];
             for (const [invoice, rows] of Array.from(byInvoice.entries())) {
-                const tableRow = this.buildRowFromPayments(invoice === '__NO_INVOICE__' ? '' : invoice, rows, rules);
+                const tableRow = await this.buildRowFromPayments(invoice === '__NO_INVOICE__' ? '' : invoice, rows, rules);
                 if (tableRow) {
                     result.push(tableRow);
                 }
