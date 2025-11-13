@@ -384,6 +384,18 @@ class AttendanceVerificationService {
             googleSheets_1.googleSheetsService.readSheet(this.RULES_SHEET).catch(() => []),
             googleSheets_1.googleSheetsService.readSheet(this.DISCOUNTS_SHEET).catch(() => [])
         ]);
+        console.log(`📥 loadAllData(): attendance=${attendance.length}, payments=${payments.length}, rules=${rawRules.length}, rawDiscounts=${discounts.length}`);
+        if (discounts.length > 0) {
+            const preview = discounts.slice(0, 5).map((d, idx) => ({
+                index: idx,
+                discount_code: this.getField(d, ['discount_code', 'Discount Code']),
+                name: this.getField(d, ['name', 'Name']),
+                keyword: this.getField(d, ['payment_memo_keyword', 'Payment Memo Keyword']),
+                match_type: this.getField(d, ['match_type', 'Match Type']),
+                active: this.getField(d, ['active', 'Active'])
+            }));
+            console.log('📄 Raw discount preview:', preview);
+        }
         const normalizedRules = this.normalizeRules(rawRules);
         return { attendance, payments, rules: normalizedRules, discounts };
     }
@@ -1348,11 +1360,17 @@ class AttendanceVerificationService {
             return master;
         }
         console.log(`🔍 Applying discounts to ${master.length} records using memo-based matching`);
-        const activeDiscounts = discounts
-            .map(d => this.normalizeDiscountRow(d))
-            .filter(d => d && d.active);
-        console.log(`📊 Found ${activeDiscounts.length} active discounts`);
-        console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
+        const normalizedDiscounts = discounts.map(d => this.normalizeDiscountRow(d)).filter(Boolean);
+        const activeDiscounts = normalizedDiscounts.filter(d => d.active);
+        console.log(`📊 Active discounts: ${activeDiscounts.length}/${normalizedDiscounts.length}`);
+        if (activeDiscounts.length > 0) {
+            console.log('🔑 Active discount keywords:', activeDiscounts.map(d => ({
+                name: d.name,
+                keyword: d.payment_memo_keyword,
+                match_type: d.match_type,
+                pct: d.applicable_percentage
+            })));
+        }
         const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
         console.log(`📋 Sample payment memos:`, sampleMemos);
         const updated = master.map(row => {
@@ -1428,11 +1446,9 @@ class AttendanceVerificationService {
             console.log(`⚠️ No discounts available to apply`);
             return masterData;
         }
-        const activeDiscounts = discounts
-            .map(d => this.normalizeDiscountRow(d))
-            .filter(d => d && d.active);
-        console.log(`📊 Found ${activeDiscounts.length} active discounts`);
-        console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
+        const normalizedDiscounts = discounts.map(d => this.normalizeDiscountRow(d)).filter(Boolean);
+        const activeDiscounts = normalizedDiscounts.filter(d => d.active);
+        console.log(`📊 Active discounts (invoice pass): ${activeDiscounts.length}/${normalizedDiscounts.length}`);
         const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
         console.log(`📋 Sample payment memos:`, sampleMemos);
         const updated = masterData.map(row => {
@@ -1545,9 +1561,9 @@ class AttendanceVerificationService {
         if (!discounts || discounts.length === 0 || !payments || payments.length === 0)
             return master;
         const invoiceToDiscount = new Map();
-        const activeDiscounts = discounts
-            .map(d => this.normalizeDiscountRow(d))
-            .filter(d => d && d.active);
+        const normalizedDiscounts = discounts.map(d => this.normalizeDiscountRow(d)).filter(Boolean);
+        const activeDiscounts = normalizedDiscounts.filter(d => d && d.active);
+        console.log(`📊 Active discounts (payments pass): ${activeDiscounts.length}/${normalizedDiscounts.length}`);
         for (const p of payments) {
             const memo = String(p.Memo || '');
             const invoice = String(p.Invoice || '').trim();

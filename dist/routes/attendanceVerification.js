@@ -222,7 +222,9 @@ router.post('/add-discounts', async (req, res) => {
             });
         }
         const { payments, discounts, rules } = await attendanceVerificationService_1.attendanceVerificationService['loadAllData']();
+        console.log(`📥 Add Discounts inputs -> master:${masterData.length} payments:${payments.length} discounts:${discounts.length} rules:${rules.length}`);
         const updatedMasterData = await attendanceVerificationService_1.attendanceVerificationService['applyDiscountsToMasterData'](masterData, discounts, payments, rules);
+        console.log(`📦 applyDiscountsToMasterData returned ${updatedMasterData.length} rows`);
         await attendanceVerificationService_1.attendanceVerificationService.saveMasterData(updatedMasterData);
         const discountAppliedCount = updatedMasterData.filter(r => r.discount && r.discountPercentage > 0).length;
         console.log(`✅ Add Discounts complete: ${discountAppliedCount} records updated with discounts`);
