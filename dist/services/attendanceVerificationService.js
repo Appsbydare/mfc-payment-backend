@@ -333,7 +333,7 @@ class AttendanceVerificationService {
             const discountAppliedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
             console.log(`✅ Step 2: Discount application completed - ${discountAppliedCount} records with discounts`);
             console.log('📋 Step 3: Recalculating amounts (memory only)...');
-            masterData = await this.recalculateDiscountedAmounts(masterData, rules);
+            masterData = await this.recalculateDiscountedAmounts(masterData, rules, discounts);
             const recalculatedCount = masterData.filter(r => r.discount && r.discountPercentage > 0).length;
             console.log(`✅ Step 3: Amount recalculation completed - ${recalculatedCount} records recalculated`);
             console.log('📋 Step 4: Re-verifying invoices with discounted amounts (memory only)...');
@@ -1926,7 +1926,9 @@ class AttendanceVerificationService {
                 return row;
             }
             const discountPercentage = Number(matchingDiscount.applicable_percentage || 0);
-            console.log(`💰 Adding discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%)`);
+            const coachPaymentType = String(matchingDiscount.coach_payment_type || 'partial').toLowerCase().trim();
+            const isFreeDiscount = coachPaymentType === 'free';
+            console.log(`💰 Adding discount to ${row.customerName}: ${matchingDiscount.name} (${discountPercentage}%) - Payment Type: ${coachPaymentType}`);
             const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
             const sessions = matchingRule && Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0) > 0
                 ? Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0)
@@ -1934,30 +1936,58 @@ class AttendanceVerificationService {
             const paid = Number(row.amount || 0) || 0;
             const discountedPaid = this.round2(paid * (1 - discountPercentage / 100));
             const discountedSessionPrice = sessions > 0 ? this.round2(discountedPaid / sessions) : discountedPaid;
-            const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
+            let coachAmount = 0;
+            let bgmAmount = 0;
+            let managementAmount = 0;
+            let mfcAmount = 0;
+            if (!isFreeDiscount) {
+                const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
+                coachAmount = this.round2(amounts.coach);
+                bgmAmount = this.round2(amounts.bgm);
+                managementAmount = this.round2(amounts.management);
+                mfcAmount = this.round2(amounts.mfc);
+            } else {
+                console.log(`🆓 Free discount detected in applyDiscountsToMasterData: "${matchingDiscount.name}" - Setting all commissions to zero`);
+            }
             return {
                 ...row,
                 discount: matchingDiscount.name,
                 discountPercentage: discountPercentage,
                 discountedSessionPrice: discountedSessionPrice,
-                coachAmount: this.round2(amounts.coach),
-                bgmAmount: this.round2(amounts.bgm),
-                managementAmount: this.round2(amounts.management),
-                mfcAmount: this.round2(amounts.mfc)
+                coachAmount,
+                bgmAmount,
+                managementAmount,
+                mfcAmount
             };
         });
         const discountAppliedCount = updated.filter(r => r.discount && r.discountPercentage > 0).length;
         console.log(`✅ Added discount information to ${discountAppliedCount} records`);
         return updated;
     }
-    async recalculateDiscountedAmounts(masterData, rules) {
+    async recalculateDiscountedAmounts(masterData, rules, discounts = []) {
         console.log(`💰 Recalculating amounts for ${masterData.length} master records`);
+        // Build a map of discount names to discount objects for quick lookup
+        const discountMap = new Map();
+        if (discounts && discounts.length > 0) {
+            const normalizedDiscounts = discounts.map(d => this.normalizeDiscountRow(d)).filter(Boolean);
+            normalizedDiscounts.forEach(d => {
+                const discountName = String(d.name || '').trim();
+                if (discountName) {
+                    discountMap.set(discountName.toLowerCase(), d);
+                }
+            });
+        }
         const updated = masterData.map(row => {
             if (!row.discount || row.discountPercentage <= 0) {
                 return row;
             }
             const discountPercentage = row.discountPercentage;
             const discountFactor = 1 - (discountPercentage / 100);
+            // Check if this discount has 'free' payment type
+            const discountName = String(row.discount || '').trim();
+            const discountObj = discountName ? discountMap.get(discountName.toLowerCase()) : null;
+            const coachPaymentType = discountObj ? String(discountObj.coach_payment_type || 'partial').toLowerCase().trim() : 'partial';
+            const isFreeDiscount = coachPaymentType === 'free';
             const matchingRule = this.findMatchingRuleExact(row.membershipName, row.sessionType, rules);
             const sessions = matchingRule && Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0) > 0
                 ? Number(matchingRule.sessions_per_pack || matchingRule.sessions || 0)
@@ -1965,23 +1995,35 @@ class AttendanceVerificationService {
             const paid = Number(row.amount || 0) || 0;
             const discountedPaid = this.round2(paid * discountFactor);
             const discountedSessionPrice = sessions > 0 ? this.round2(discountedPaid / sessions) : discountedPaid;
-            console.log(`💰 Recalculating ${row.customerName}: ${row.discount} (${discountPercentage}%)`);
+            console.log(`💰 Recalculating ${row.customerName}: ${row.discount} (${discountPercentage}%) - Payment Type: ${coachPaymentType}`);
             console.log(`   Session Price: ${row.sessionPrice} → ${discountedSessionPrice}`);
-            const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
+            let coachAmount = 0;
+            let bgmAmount = 0;
+            let managementAmount = 0;
+            let mfcAmount = 0;
+            if (!isFreeDiscount) {
+                const amounts = this.calculateAmounts(discountedSessionPrice, matchingRule, row.sessionType);
+                coachAmount = this.round2(amounts.coach);
+                bgmAmount = this.round2(amounts.bgm);
+                managementAmount = this.round2(amounts.management);
+                mfcAmount = this.round2(amounts.mfc);
+            } else {
+                console.log(`🆓 Free discount detected in recalculateDiscountedAmounts: "${discountName}" - Setting all commissions to zero`);
+            }
             return {
                 ...row,
                 discountedSessionPrice: discountedSessionPrice,
-                coachAmount: this.round2(amounts.coach),
-                bgmAmount: this.round2(amounts.bgm),
-                managementAmount: this.round2(amounts.management),
-                mfcAmount: this.round2(amounts.mfc)
+                coachAmount,
+                bgmAmount,
+                managementAmount,
+                mfcAmount
             };
         });
         const recalculatedCount = updated.filter(r => r.discount && r.discountPercentage > 0).length;
         console.log(`✅ Recalculated amounts for ${recalculatedCount} discounted records`);
         return updated;
     }
-    applyDiscountsFromPayments(master, payments, discounts) {
+    applyDiscountsFromPayments(master, payments, discounts, rules) {
         if (!discounts || discounts.length === 0 || !payments || payments.length === 0)
             return master;
         const invoiceToDiscount = new Map();
@@ -2015,7 +2057,11 @@ class AttendanceVerificationService {
                     const pct = Number(d.applicable_percentage || 0) || 0;
                     const existing = invoiceToDiscount.get(invoice);
                     if (!existing || pct > existing.pct) {
-                        invoiceToDiscount.set(invoice, { name: String(d.name || keyword), pct });
+                        invoiceToDiscount.set(invoice, { 
+                            name: String(d.name || keyword), 
+                            pct,
+                            coach_payment_type: String(d.coach_payment_type || 'partial').toLowerCase().trim()
+                        });
                     }
                 }
             }
@@ -2030,12 +2076,26 @@ class AttendanceVerificationService {
             if (!found)
                 return r;
             const factor = 1 - (Number(found.pct) || 0) / 100;
+            const coachPaymentType = found.coach_payment_type || 'partial';
+            const isFreeDiscount = coachPaymentType === 'free';
             const rule = this.findMatchingRuleExact(r.membershipName, r.sessionType, rules);
             const sessions = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0 ? Number(rule.sessions_per_pack || rule.sessions || 0) : 1;
             const paid = Number(r.amount || 0) || 0;
             const discountedPaid = this.round2(paid * factor);
             const discountedPrice = sessions > 0 ? this.round2(discountedPaid / sessions) : discountedPaid;
-            const amounts = this.calculateAmounts(discountedPrice, rule, r.sessionType);
+            let coachAmount = 0;
+            let bgmAmount = 0;
+            let managementAmount = 0;
+            let mfcAmount = 0;
+            if (!isFreeDiscount) {
+                const amounts = this.calculateAmounts(discountedPrice, rule, r.sessionType);
+                coachAmount = this.round2(amounts.coach);
+                bgmAmount = this.round2(amounts.bgm);
+                managementAmount = this.round2(amounts.management);
+                mfcAmount = this.round2(amounts.mfc);
+            } else {
+                console.log(`🆓 Free discount detected in applyDiscountsFromPayments: "${found.name}" - Setting all commissions to zero`);
+            }
             return {
                 ...r,
                 discount: found.name,
@@ -2044,10 +2104,10 @@ class AttendanceVerificationService {
                 packagePrice: r.packagePrice,
                 sessionPrice: r.sessionPrice,
                 discountedSessionPrice: discountedPrice,
-                coachAmount: this.round2(amounts.coach),
-                bgmAmount: this.round2(amounts.bgm),
-                managementAmount: this.round2(amounts.management),
-                mfcAmount: this.round2(amounts.mfc)
+                coachAmount,
+                bgmAmount,
+                managementAmount,
+                mfcAmount
             };
         });
         return updated;
