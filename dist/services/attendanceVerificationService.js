@@ -573,7 +573,43 @@ class AttendanceVerificationService {
         const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
         const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
         const status = this.getField(attendance, ['Status']) || '';
-        const sessionTypeRaw = this.classifySessionType(attendance['Offering Type Name'] || '');
+        // First, try to find matching rule to get the correct session_type (Category)
+        let sessionTypeRaw = 'group'; // Default to group
+        let matchingRule = null;
+        if (membershipName && rules && rules.length > 0) {
+            // Try to find rule by membership name (check attendance_alias first, then package_name)
+            for (const r of rules) {
+                const attendanceAlias = String(r.attendance_alias || '').trim();
+                const packageName = String(r.package_name || r.rule_name || '').trim();
+                const membershipLower = membershipName.toLowerCase().trim();
+                if (attendanceAlias && attendanceAlias.toLowerCase() === membershipLower) {
+                    matchingRule = r;
+                    sessionTypeRaw = r.session_type || 'group';
+                    break;
+                }
+                if (packageName && packageName.toLowerCase() === membershipLower) {
+                    matchingRule = r;
+                    sessionTypeRaw = r.session_type || 'group';
+                    break;
+                }
+            }
+            // If no exact match, try partial match
+            if (!matchingRule) {
+                for (const r of rules) {
+                    const packageName = String(r.package_name || r.rule_name || '').trim().toLowerCase();
+                    const membershipLower = membershipName.toLowerCase().trim();
+                    if (packageName && (membershipLower.includes(packageName) || packageName.includes(membershipLower))) {
+                        matchingRule = r;
+                        sessionTypeRaw = r.session_type || 'group';
+                        break;
+                    }
+                }
+            }
+        }
+        // Fallback: use classifySessionType if no rule found
+        if (!matchingRule) {
+            sessionTypeRaw = this.classifySessionType(attendance['Offering Type Name'] || '');
+        }
         let paymentDate = '';
         let priceSource = 'unmatched';
         let verificationStatus = 'Not Verified';
@@ -666,7 +702,8 @@ class AttendanceVerificationService {
                 }
             }
         }
-        const rule = this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
+        // Use the matching rule we found earlier, or find it again with the correct sessionTypeRaw
+        const rule = matchingRule || this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
         if (rule && !isFreeDiscount) {
             const coachPct = Number(rule.coach_percentage || 0);
             const managementPct = Number(rule.management_percentage || 0);
@@ -723,7 +760,43 @@ class AttendanceVerificationService {
         const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
         const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
         const status = this.getField(attendance, ['Status']) || '';
-        const sessionTypeRaw = this.classifySessionType(attendance['Offering Type Name'] || '');
+        // First, try to find matching rule to get the correct session_type (Category)
+        let sessionTypeRaw = 'group'; // Default to group
+        let matchingRule = null;
+        if (membershipName && rules && rules.length > 0) {
+            // Try to find rule by membership name (check attendance_alias first, then package_name)
+            for (const r of rules) {
+                const attendanceAlias = String(r.attendance_alias || '').trim();
+                const packageName = String(r.package_name || r.rule_name || '').trim();
+                const membershipLower = membershipName.toLowerCase().trim();
+                if (attendanceAlias && attendanceAlias.toLowerCase() === membershipLower) {
+                    matchingRule = r;
+                    sessionTypeRaw = r.session_type || 'group';
+                    break;
+                }
+                if (packageName && packageName.toLowerCase() === membershipLower) {
+                    matchingRule = r;
+                    sessionTypeRaw = r.session_type || 'group';
+                    break;
+                }
+            }
+            // If no exact match, try partial match
+            if (!matchingRule) {
+                for (const r of rules) {
+                    const packageName = String(r.package_name || r.rule_name || '').trim().toLowerCase();
+                    const membershipLower = membershipName.toLowerCase().trim();
+                    if (packageName && (membershipLower.includes(packageName) || packageName.includes(membershipLower))) {
+                        matchingRule = r;
+                        sessionTypeRaw = r.session_type || 'group';
+                        break;
+                    }
+                }
+            }
+        }
+        // Fallback: use classifySessionType if no rule found
+        if (!matchingRule) {
+            sessionTypeRaw = this.classifySessionType(attendance['Offering Type Name'] || '');
+        }
         const matchedPayment = this.findBestPaymentForAttendance(normalizedCustomer, attendanceDate, paymentsByCustomer);
         let invoiceNumber = '';
         let paymentDate = '';
@@ -782,7 +855,8 @@ class AttendanceVerificationService {
         let coachAmount = 0;
         let managementAmount = 0;
         let mfcAmount = 0;
-        const rule = this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
+        // Use the matching rule we found earlier, or find it again with the correct sessionTypeRaw
+        const rule = matchingRule || this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
         if (rule) {
             const coachPct = Number(rule.coach_percentage || 0);
             const managementPct = Number(rule.management_percentage || 0);
