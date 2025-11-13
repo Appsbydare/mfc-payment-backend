@@ -132,7 +132,7 @@ class PaymentVerificationService {
         }
         const discountAmount = round2(discountAmountRaw);
         const effectiveFinal = round2(discountEffectiveAmount);
-        const netPriceRaw = effectiveFinal - taxAmount;
+        const netPriceRaw = paymentsTotal - taxAmount - discountAmountRaw;
         const netPrice = netPriceRaw < 0 ? 0 : round2(netPriceRaw);
         const rule = this.findRuleForPackage(basePayment.Memo || '', rules);
         const sessions = rule && Number(rule.sessions_per_pack || rule.sessions || 0) > 0
@@ -149,7 +149,6 @@ class PaymentVerificationService {
             discountAmount,
             tax: round2(taxAmount),
             discountPercentage: round2(discountPercentage),
-            finalPrice: effectiveFinal < 0 ? 0 : effectiveFinal,
             netPrice,
             numberOfSessions: sessions,
             discountedSessionPrice,
