@@ -1314,7 +1314,15 @@ class AttendanceVerificationService {
             return master;
         }
         console.log(`🔍 Applying discounts to ${master.length} records using memo-based matching`);
-        const activeDiscounts = discounts.filter((d) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+        const activeDiscounts = discounts.filter((d) => {
+            if (!d)
+                return false;
+            const activeValue = this.getField(d, ['active', 'Active']);
+            if (activeValue === '')
+                return false;
+            const str = String(activeValue).trim().toLowerCase();
+            return str === 'true' || str === '1' || str === 'yes';
+        });
         console.log(`📊 Found ${activeDiscounts.length} active discounts`);
         console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
         const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
@@ -1387,7 +1395,15 @@ class AttendanceVerificationService {
             console.log(`⚠️ No discounts available to apply`);
             return masterData;
         }
-        const activeDiscounts = discounts.filter((d) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+        const activeDiscounts = discounts.filter((d) => {
+            if (!d)
+                return false;
+            const activeValue = this.getField(d, ['active', 'Active']);
+            if (activeValue === '')
+                return false;
+            const str = String(activeValue).trim().toLowerCase();
+            return str === 'true' || str === '1' || str === 'yes';
+        });
         console.log(`📊 Found ${activeDiscounts.length} active discounts`);
         console.log(`📋 Active discount names:`, activeDiscounts.map(d => d.name));
         const sampleMemos = payments.slice(0, 10).map(p => p.Memo).filter(Boolean);
@@ -1407,8 +1423,9 @@ class AttendanceVerificationService {
             console.log(`🔍 Checking invoice ${invoice} with memo: "${memo}"`);
             let matchingDiscount = null;
             for (const discount of activeDiscounts) {
-                const discountName = String(discount.name || '').trim();
-                const paymentKeyword = String(discount.payment_memo_keyword || discount.name || '').trim();
+                const discountNameRaw = this.getField(discount, ['name', 'Name']);
+                const discountName = String(discountNameRaw || '').trim();
+                const paymentKeyword = (this.getField(discount, ['payment_memo_keyword', 'Payment Memo Keyword', 'payment memo keyword']) || discountName).trim();
                 if (!paymentKeyword)
                     continue;
                 
@@ -1417,7 +1434,8 @@ class AttendanceVerificationService {
                 
                 // Check match based on match_type
                 let isMatch = false;
-                const matchType = String(discount.match_type || 'exact').toLowerCase();
+                const matchTypeRaw = this.getField(discount, ['match_type', 'Match Type']);
+                const matchType = matchTypeRaw ? String(matchTypeRaw).toLowerCase() : 'exact';
                 
                 if (matchType === 'exact') {
                     isMatch = memoLower === keywordLower;
@@ -1502,7 +1520,15 @@ class AttendanceVerificationService {
         if (!discounts || discounts.length === 0 || !payments || payments.length === 0)
             return master;
         const invoiceToDiscount = new Map();
-        const activeDiscounts = discounts.filter((d) => d && (d.active === true || String(d.active).toLowerCase() === 'true'));
+        const activeDiscounts = discounts.filter((d) => {
+            if (!d)
+                return false;
+            const activeValue = this.getField(d, ['active', 'Active']);
+            if (activeValue === '')
+                return false;
+            const str = String(activeValue).trim().toLowerCase();
+            return str === 'true' || str === '1' || str === 'yes';
+        });
         for (const p of payments) {
             const memo = String(p.Memo || '');
             const invoice = String(p.Invoice || '').trim();

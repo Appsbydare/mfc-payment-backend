@@ -44,19 +44,40 @@ router.get('/', async (req, res) => {
         try {
             const rawData = await sheetsService.readSheet('discounts');
             console.log('Raw discount data from sheets:', rawData);
-            discounts = rawData.map((row, index) => ({
-                id: row.id || (index + 1),
-                discount_code: row.discount_code || row['discount_code'] || '',
-                name: row.name || row['name'] || '',
-                payment_memo_keyword: row.payment_memo_keyword || row['payment_memo_keyword'] || row.name || row['name'] || '',
-                applicable_percentage: parseFloat(row.applicable_percentage || row['applicable_percentage'] || '0'),
-                coach_payment_type: (row.coach_payment_type || row['coach_payment_type'] || 'partial').toLowerCase(),
-                match_type: (row.match_type || row['match_type'] || 'exact').toLowerCase(),
-                active: row.active === true || row.active === 'TRUE' || row.active === '1' || row.active === 1,
-                notes: row.notes || row['notes'] || '',
-                created_at: row.created_at || row['created_at'] || new Date().toISOString(),
-                updated_at: row.updated_at || row['updated_at'] || new Date().toISOString()
-            })).filter(discount => discount.discount_code && discount.name);
+            discounts = rawData.map((row, index) => {
+                const getValue = (...keys) => {
+                    for (const key of keys) {
+                        if (key && Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
+                            return row[key];
+                        }
+                        const normalized = key && key.toLowerCase().replace(/\s+/g, '_');
+                        if (normalized && Object.prototype.hasOwnProperty.call(row, normalized) && row[normalized] !== undefined && row[normalized] !== null && String(row[normalized]).trim() !== '') {
+                            return row[normalized];
+                        }
+                    }
+                    return '';
+                };
+                const getBoolean = (...keys) => {
+                    const value = getValue(...keys);
+                    if (typeof value === 'boolean')
+                        return value;
+                    const str = String(value).trim().toLowerCase();
+                    return str === 'true' || str === '1' || str === 'yes';
+                };
+                return {
+                    id: getValue('id') || (index + 1),
+                    discount_code: getValue('discount_code', 'Discount Code'),
+                    name: getValue('name', 'Name'),
+                    payment_memo_keyword: getValue('payment_memo_keyword', 'Payment Memo Keyword') || getValue('name', 'Name'),
+                    applicable_percentage: parseFloat(getValue('applicable_percentage', 'Applicable Percentage') || '0'),
+                    coach_payment_type: String(getValue('coach_payment_type', 'Coach Payment Type') || 'partial').toLowerCase(),
+                    match_type: String(getValue('match_type', 'Match Type') || 'exact').toLowerCase(),
+                    active: getBoolean('active', 'Active'),
+                    notes: getValue('notes', 'Notes'),
+                    created_at: getValue('created_at', 'Created At') || new Date().toISOString(),
+                    updated_at: getValue('updated_at', 'Updated At') || new Date().toISOString()
+                };
+            }).filter(discount => discount.discount_code && discount.name);
         }
         catch (sheetsError) {
             console.error('Error reading from sheets, falling back to service:', sheetsError);

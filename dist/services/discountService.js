@@ -185,7 +185,16 @@ class DiscountService {
         // Create row data in correct column order
         const rowData = {};
         headers.forEach(header => {
-            rowData[header] = newDiscount[header] !== undefined ? newDiscount[header] : '';
+            const normalized = header.toLowerCase().replace(/\s+/g, '_');
+            if (newDiscount[normalized] !== undefined) {
+                rowData[header] = newDiscount[normalized];
+            }
+            else if (newDiscount[header] !== undefined) {
+                rowData[header] = newDiscount[header];
+            }
+            else {
+                rowData[header] = '';
+            }
         });
         
         await this.googleSheetsService.appendToSheet('discounts', [rowData]);
