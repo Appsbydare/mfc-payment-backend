@@ -94,42 +94,55 @@ class AttendanceVerificationService {
                 const isExactMatch = attDate.getFullYear() === invoiceDate.getFullYear() &&
                     attDate.getMonth() === invoiceDate.getMonth() &&
                     attDate.getDate() === invoiceDate.getDate();
-                return { att, distance, date: attDate, isExactMatch };
+                // Check if attendance is on or after invoice date (same day or later)
+                const isOnOrAfterInvoiceDate = attDate.getTime() >= invoiceDate.getTime();
+                return { att, distance, date: attDate, isExactMatch, isOnOrAfterInvoiceDate };
             });
-            attendanceWithDistance.sort((a, b) => {
+            // Filter out attendance that happens before invoice date (for normal invoices)
+            // For zero-session invoices, we still allow exact date matches even if before
+            let filteredAttendance = attendanceWithDistance;
+            if (!isZeroSessions) {
+                filteredAttendance = attendanceWithDistance.filter(item => item.isOnOrAfterInvoiceDate);
+                if (filteredAttendance.length === 0) {
+                    console.log(`⚠️ Invoice ${invoice} (${customer}): No attendance records found on or after invoice date ${invoiceRow.date}`);
+                }
+            }
+            filteredAttendance.sort((a, b) => {
                 // For zero-session invoices, prioritize exact date matches
                 if (isZeroSessions) {
                     if (a.isExactMatch !== b.isExactMatch) {
                         return b.isExactMatch ? -1 : 1; // Exact matches first
                     }
-                    // If both are exact matches or both are not, prefer attendance on or before invoice date
-                    const aBefore = a.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
-                    const bBefore = b.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
-                    if (aBefore !== bBefore) {
-                        return aBefore - bBefore;
+                    // If both are exact matches or both are not, prefer attendance on or after invoice date
+                    const aAfter = a.date.getTime() >= invoiceDate.getTime() ? 0 : 1;
+                    const bAfter = b.date.getTime() >= invoiceDate.getTime() ? 0 : 1;
+                    if (aAfter !== bAfter) {
+                        return aAfter - bAfter;
                     }
                     return a.distance - b.distance;
                 }
-                // For normal invoices, prefer attendance on or before invoice date
-                const aBefore = a.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
-                const bBefore = b.date.getTime() <= invoiceDate.getTime() ? 0 : 1;
-                if (aBefore !== bBefore) {
-                    return aBefore - bBefore;
+                // For normal invoices, prefer attendance on the same day as invoice, then closest after
+                if (a.isExactMatch !== b.isExactMatch) {
+                    return b.isExactMatch ? -1 : 1; // Exact matches first
                 }
-                // Then by distance
+                // Then by distance (closest first)
                 return a.distance - b.distance;
             });
             // Link up to numberOfSessions attendance records
             // For zero-session invoices, only link exact date matches (max 1)
             let linkedCount = 0;
             const maxToLink = isZeroSessions ? 1 : numberOfSessions;
-            for (const { att, isExactMatch } of attendanceWithDistance) {
+            for (const { att, isExactMatch, isOnOrAfterInvoiceDate } of filteredAttendance) {
                 // Strict check: only link if we haven't reached the exact limit
                 if (linkedCount >= maxToLink) {
                     break;
                 }
                 // For zero-session invoices, only link if date matches exactly
                 if (isZeroSessions && !isExactMatch) {
+                    continue;
+                }
+                // For normal invoices, only link if attendance is on or after invoice date
+                if (!isZeroSessions && !isOnOrAfterInvoiceDate) {
                     continue;
                 }
                 const key = this.generateUniqueKey(att);
