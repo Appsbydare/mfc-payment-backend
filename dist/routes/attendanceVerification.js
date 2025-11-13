@@ -212,41 +212,6 @@ router.post('/verify-v2', async (req, res) => {
         });
     }
 });
-router.post('/add-discounts', async (req, res) => {
-    try {
-        console.log('🔍 Starting Add Discounts process...');
-        const masterData = await attendanceVerificationService_1.attendanceVerificationService.loadExistingMasterData();
-        if (masterData.length === 0) {
-            return res.json({
-                success: false,
-                message: 'No verified data found. Please run verification first.'
-            });
-        }
-        const { payments, discounts, rules } = await attendanceVerificationService_1.attendanceVerificationService['loadAllData']();
-        console.log(`📥 Add Discounts inputs -> master:${masterData.length} payments:${payments.length} discounts:${discounts.length} rules:${rules.length}`);
-        const updatedMasterData = await attendanceVerificationService_1.attendanceVerificationService['applyDiscountsToMasterData'](masterData, discounts, payments, rules);
-        console.log(`📦 applyDiscountsToMasterData returned ${updatedMasterData.length} rows`);
-        await attendanceVerificationService_1.attendanceVerificationService.saveMasterData(updatedMasterData);
-        const discountAppliedCount = updatedMasterData.filter(r => r.discount && r.discountPercentage > 0).length;
-        console.log(`✅ Add Discounts complete: ${discountAppliedCount} records updated with discounts`);
-        res.json({
-            success: true,
-            message: `Discounts added to ${discountAppliedCount} records`,
-            data: updatedMasterData,
-            summary: {
-                totalRecords: updatedMasterData.length,
-                discountAppliedCount: discountAppliedCount
-            }
-        });
-    }
-    catch (error) {
-        console.error('Error adding discounts:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to add discounts'
-        });
-    }
-});
 router.post('/recalculate-discounts', async (req, res) => {
     try {
         console.log('💰 Starting Recalculate Discounts process...');

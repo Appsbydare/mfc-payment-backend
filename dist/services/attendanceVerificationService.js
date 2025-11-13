@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.attendanceVerificationService = exports.AttendanceVerificationService = void 0;
 const googleSheets_1 = require("./googleSheets");
 const invoiceVerificationService_1 = require("./invoiceVerificationService");
+const paymentVerificationService_1 = require("./paymentVerificationService");
 class AttendanceVerificationService {
     constructor() {
         this.MASTER_SHEET = 'payment_calc_detail';
@@ -14,23 +15,28 @@ class AttendanceVerificationService {
     async verifyAttendanceDataV2(params = {}) {
         const startTime = Date.now();
         try {
-            console.log('🔄 Starting V2 verification: payment-match + (paid - tax - discount)/sessions');
-            const { attendance, payments, rules, discounts } = await this.loadAllData();
+            console.log('🔄 Starting simplified verification using payment verification data');
+            const { attendance, payments } = await this.loadAllData();
+            const paymentVerificationRows = await paymentVerificationService_1.paymentVerificationService.getPaymentVerificationTable();
+            const paymentsByCustomer = this.groupPaymentsByCustomer(payments);
+            const paymentInfoByInvoice = new Map();
+            paymentVerificationRows.forEach(row => {
+                const invoice = String(row.invoice || '').trim();
+                if (!invoice)
+                    return;
+                paymentInfoByInvoice.set(invoice, row);
+            });
             const filteredAttendance = this.filterAttendanceByDate(attendance, params.fromDate, params.toDate);
-            const masterRows = [];
-            for (const att of filteredAttendance) {
-                const row = await this.processAttendanceRecordV2(att, payments, rules, discounts);
-                masterRows.push(row);
-            }
+            const masterRows = filteredAttendance.map(att => this.buildSimpleMasterRow(att, paymentsByCustomer, paymentInfoByInvoice));
             if (!params.skipWrite) {
                 await this.saveMasterData(masterRows);
             }
             const summary = this.calculateSummary(masterRows);
-            console.log(`✅ V2 verification done: ${summary.totalRecords} records, paid=${summary.verifiedRecords}, time=${Date.now() - startTime}ms`);
+            console.log(`✅ Simplified verification complete: ${summary.totalRecords} records processed in ${Date.now() - startTime}ms`);
             return { masterRows, summary };
         }
         catch (error) {
-            console.error('❌ V2 Verification failed:', error);
+            console.error('❌ Simplified verification failed:', error);
             throw error;
         }
     }
@@ -398,6 +404,160 @@ class AttendanceVerificationService {
         }
         const normalizedRules = this.normalizeRules(rawRules);
         return { attendance, payments, rules: normalizedRules, discounts };
+    }
+    groupPaymentsByCustomer(payments) {
+        const map = new Map();
+        payments.forEach(payment => {
+            const normalizedCustomer = this.normalizeCustomerName(payment.Customer || payment.customer || '');
+            if (!normalizedCustomer)
+                return;
+            const amount = Number(payment.Amount || payment.amount || 0);
+            const invoice = String(payment.Invoice || payment.invoice || '').trim();
+            if (amount === 0 && !invoice)
+                return;
+            if (!map.has(normalizedCustomer)) {
+                map.set(normalizedCustomer, []);
+            }
+            map.get(normalizedCustomer).push(payment);
+        });
+        for (const paymentsList of map.values()) {
+            paymentsList.sort((a, b) => {
+                const dateA = this.parseDate(a.Date || a.ImportTimestamp || '');
+                const dateB = this.parseDate(b.Date || b.ImportTimestamp || '');
+                if (!dateA && !dateB)
+                    return 0;
+                if (!dateA)
+                    return 1;
+                if (!dateB)
+                    return -1;
+                return dateA.getTime() - dateB.getTime();
+            });
+        }
+        return map;
+    }
+    findBestPaymentForAttendance(customerKey, attendanceDate, paymentsByCustomer) {
+        if (!customerKey || !attendanceDate)
+            return null;
+        const list = paymentsByCustomer.get(customerKey);
+        if (!list || list.length === 0)
+            return null;
+        const datedPayments = list.map(payment => ({
+            payment,
+            date: this.parseDate(payment.Date || payment.ImportTimestamp || '')
+        })).filter(item => !!item.date);
+        if (datedPayments.length === 0)
+            return null;
+        let selectedPayment = null;
+        const onOrBefore = datedPayments
+            .filter(item => item.date.getTime() <= attendanceDate.getTime())
+            .sort((a, b) => b.date.getTime() - a.date.getTime());
+        if (onOrBefore.length > 0) {
+            selectedPayment = onOrBefore[0].payment;
+        }
+        else {
+            const afterList = datedPayments.sort((a, b) => a.date.getTime() - b.date.getTime());
+            selectedPayment = afterList[0].payment;
+        }
+        if (selectedPayment) {
+            const originalList = paymentsByCustomer.get(customerKey);
+            const index = originalList.indexOf(selectedPayment);
+            if (index >= 0) {
+                originalList.splice(index, 1);
+            }
+        }
+        return selectedPayment;
+    }
+    buildSimpleMasterRow(attendance, paymentsByCustomer, paymentInfoByInvoice) {
+        const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
+        const normalizedCustomer = this.normalizeCustomerName(customerName);
+        const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
+        const attendanceDate = this.parseDate(eventStartsAt);
+        const membershipName = this.getField(attendance, ['Membership Name', 'Membership', 'MembershipName']) || '';
+        const classType = this.getField(attendance, ['Class Type', 'ClassType', 'Offering Type Name']) || '';
+        const instructors = this.getField(attendance, ['Instructors', 'Instructor']) || '';
+        const status = this.getField(attendance, ['Status']) || '';
+        const sessionTypeRaw = this.classifySessionType(attendance['Offering Type Name'] || '');
+        const matchedPayment = this.findBestPaymentForAttendance(normalizedCustomer, attendanceDate, paymentsByCustomer);
+        let invoiceNumber = '';
+        let paymentDate = '';
+        let priceSource = 'unmatched';
+        let verificationStatus = 'Not Verified';
+        let invoiceAmount = 0;
+        let invoiceNetAmount = 0;
+        let invoiceDiscountAmount = 0;
+        let discountMemo = '';
+        let discountPercentage = 0;
+        let numberOfSessions = 0;
+        if (matchedPayment) {
+            invoiceNumber = String(matchedPayment.Invoice || matchedPayment.invoice || '').trim();
+            paymentDate = matchedPayment.Date || matchedPayment.date || '';
+            priceSource = 'payment-verification';
+            verificationStatus = 'Verified';
+            invoiceAmount = this.round2(Number(matchedPayment.Amount || matchedPayment.amount || 0));
+            const invoiceInfo = invoiceNumber ? paymentInfoByInvoice.get(invoiceNumber) : null;
+            if (invoiceInfo) {
+                if (invoiceInfo.amount !== undefined) {
+                    invoiceAmount = this.round2(Number(invoiceInfo.amount || invoiceAmount));
+                }
+                if (invoiceInfo.netPrice !== undefined) {
+                    invoiceNetAmount = this.round2(Number(invoiceInfo.netPrice || 0));
+                }
+                if (invoiceInfo.discountAmount !== undefined) {
+                    invoiceDiscountAmount = this.round2(Number(invoiceInfo.discountAmount || 0));
+                }
+                if (invoiceInfo.numberOfSessions !== undefined) {
+                    numberOfSessions = Number(invoiceInfo.numberOfSessions || 0);
+                }
+                if (invoiceInfo.discountPercentage !== undefined) {
+                    discountPercentage = this.round2(Number(invoiceInfo.discountPercentage || 0));
+                }
+                if (invoiceInfo.discount !== undefined) {
+                    discountMemo = String(invoiceInfo.discount || '');
+                }
+            }
+        }
+        if (invoiceNetAmount <= 0) {
+            invoiceNetAmount = invoiceAmount;
+        }
+        if (numberOfSessions <= 0) {
+            numberOfSessions = 1;
+        }
+        const sessionPrice = this.round2(numberOfSessions > 0 ? invoiceNetAmount / numberOfSessions : invoiceNetAmount);
+        const discountedSessionPrice = sessionPrice;
+        const amount = sessionPrice;
+        const uniqueKey = this.generateUniqueKey(attendance);
+        return {
+            customerName,
+            eventStartsAt,
+            membershipName,
+            classType,
+            sessionType: sessionTypeRaw,
+            instructors,
+            status,
+            discount: discountMemo,
+            discountPercentage,
+            verificationStatus,
+            priceSource,
+            invoiceNumber,
+            amount,
+            paymentDate,
+            invoiceAmount: this.round2(invoiceAmount),
+            invoiceNetAmount: this.round2(invoiceNetAmount),
+            invoiceDiscountedAmount: this.round2(invoiceNetAmount),
+            invoiceVerifiedSessionPrice: sessionPrice,
+            manualSessionPrice: 0,
+            packagePrice: 0,
+            numberOfSessions,
+            sessionPrice,
+            discountedSessionPrice,
+            coachAmount: 0,
+            bgmAmount: 0,
+            managementAmount: 0,
+            mfcAmount: 0,
+            uniqueKey,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
     }
     normalizeDiscountRow(discount) {
         if (!discount)
