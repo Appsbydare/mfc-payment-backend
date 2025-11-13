@@ -122,7 +122,7 @@ class AttendanceVerificationService {
         const startTime = Date.now();
         try {
             console.log('🔄 Starting invoice-driven verification using payment verification data');
-            const { attendance, payments, rules } = await this.loadAllData();
+            const { attendance, payments, rules, discounts } = await this.loadAllData();
             const paymentVerificationRows = await paymentVerificationService_1.paymentVerificationService.getPaymentVerificationTable();
             const paymentInfoByInvoice = new Map();
             paymentVerificationRows.forEach(row => {
@@ -146,7 +146,7 @@ class AttendanceVerificationService {
             const masterRows = validAttendance.map(att => {
                 const key = this.generateUniqueKey(att);
                 const invoiceNumber = attendanceToInvoice.get(key) || '';
-                return this.buildSimpleMasterRowWithInvoice(att, invoiceNumber, paymentInfoByInvoice, payments, rules);
+                return this.buildSimpleMasterRowWithInvoice(att, invoiceNumber, paymentInfoByInvoice, payments, rules, discounts);
             });
             if (!params.skipWrite) {
                 await this.saveMasterData(masterRows);
@@ -529,7 +529,7 @@ class AttendanceVerificationService {
         }
         return selectedPayment;
     }
-    buildSimpleMasterRowWithInvoice(attendance, invoiceNumber, paymentInfoByInvoice, payments, rules) {
+    buildSimpleMasterRowWithInvoice(attendance, invoiceNumber, paymentInfoByInvoice, payments, rules, discounts = []) {
         const customerName = this.getField(attendance, ['Customer Name', 'Customer']) || '';
         const normalizedCustomer = this.normalizeCustomerName(customerName);
         const eventStartsAt = this.getField(attendance, ['Event Starts At', 'EventStartAt', 'EventStart', 'Date']) || '';
@@ -597,8 +597,42 @@ class AttendanceVerificationService {
         let coachAmount = 0;
         let managementAmount = 0;
         let mfcAmount = 0;
+        // Check if discount has 'free' payment type - if so, set all commissions to zero
+        let isFreeDiscount = false;
+        if (discountMemo && discounts && discounts.length > 0) {
+            const normalizedDiscounts = discounts.map(d => this.normalizeDiscountRow(d)).filter(Boolean);
+            const activeDiscounts = normalizedDiscounts.filter(d => d.active);
+            for (const discount of activeDiscounts) {
+                const discountName = discount.name?.trim() || '';
+                const paymentKeyword = discount.payment_memo_keyword?.trim() || discountName;
+                const memoLower = String(discountMemo).toLowerCase();
+                const keywordLower = String(paymentKeyword).toLowerCase();
+                const matchType = discount.match_type || 'exact';
+                let isMatch = false;
+                if (matchType === 'exact') {
+                    isMatch = memoLower === keywordLower;
+                } else if (matchType === 'contains') {
+                    isMatch = memoLower.includes(keywordLower) || keywordLower.includes(memoLower);
+                } else if (matchType === 'regex') {
+                    try {
+                        const regex = new RegExp(paymentKeyword, 'i');
+                        isMatch = regex.test(discountMemo);
+                    } catch (e) {
+                        console.warn(`⚠️ Invalid regex pattern for discount "${discountName}": ${paymentKeyword}`);
+                    }
+                }
+                if (isMatch) {
+                    const coachPaymentType = String(discount.coach_payment_type || 'partial').toLowerCase().trim();
+                    if (coachPaymentType === 'free') {
+                        isFreeDiscount = true;
+                        console.log(`🆓 Free discount detected: "${discountName}" - Setting all commissions to zero for invoice ${invoiceNumber}`);
+                        break;
+                    }
+                }
+            }
+        }
         const rule = this.findMatchingRuleExact(membershipName, sessionTypeRaw, rules);
-        if (rule) {
+        if (rule && !isFreeDiscount) {
             const coachPct = Number(rule.coach_percentage || 0);
             const managementPct = Number(rule.management_percentage || 0);
             const mfcPct = Number(rule.mfc_percentage || 0);
@@ -612,6 +646,7 @@ class AttendanceVerificationService {
                 mfcAmount = this.round2(discountedSessionPrice * (mfcPct / 100));
             }
         }
+        // If free discount, commissions are already zero (initialized above)
         const uniqueKey = this.generateUniqueKey(attendance);
         return {
             customerName,
